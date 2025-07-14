@@ -39,15 +39,30 @@ def process_data(output_filepath):
         try:
             duration_df = pd.read_csv(duration)
             duration_df['content_id'] = duration_df['content_id'].astype(str)
+
+            print(f"Duration rows: {len(duration_df)}")
+            print(f"User rows: {len(user_df)}")
+            print(f"Movie rows: {len(movie_df)}")
+
             merged_with_user = pd.merge(duration_df, user_df, on='username', how='inner')
+            print(f"→ After user merge: {len(merged_with_user)}")
+
             final_merged = pd.merge(merged_with_user, movie_df, on='content_id', how='inner')
+            print(f"→ After movie merge: {len(final_merged)}")
+
             all_merged_data.append(final_merged)
         except Exception as e:
             print(f"Error processing {duration}: {str(e)}")
 
     if all_merged_data:
+        print(f"→ Original: {len(combined_df)}")
+
         combined_df = pd.concat(all_merged_data, ignore_index=True)
+        print(f"→ After concat: {len(combined_df)}")
+
         combined_df = combined_df.drop_duplicates()
+        print(f"→ After drop_duplicates: {len(combined_df)}")
+
         combined_df['content_duration'] = combined_df['content_duration'].astype(float)
         combined_df['duration'] = combined_df['duration'].astype(float)
         combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
