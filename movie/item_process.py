@@ -86,8 +86,9 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1):
 
     # 2) Drop bad durations early
     movie_df['content_duration'] = pd.to_numeric(movie_df['content_duration'], errors='coerce')
-    alpha = 0.1
-    movie_df['content_duration'] = movie_df['content_duration'].clip(lower=alpha)
+    #alpha = 0.1
+    #movie_df['content_duration'] = movie_df['content_duration'].clip(lower=alpha)
+    movie_df = movie_df[movie_df['content_duration'] > 0]
 
     # 3) Keep only needed cols
     cols = ['content_id','content_single','content_publish_year','content_country',
