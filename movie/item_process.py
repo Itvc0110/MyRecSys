@@ -5,7 +5,6 @@ import os
 import joblib
 from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
 from pathlib import Path
-import numpy as np
 
 def split_categories(x):
     if pd.isna(x):
@@ -88,7 +87,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1):
     # 2) Drop bad durations early
     movie_df['content_duration'] = pd.to_numeric(movie_df['content_duration'], errors='coerce')
     alpha = 0.1
-    movie_df['content_duration'] = np.maximum(movie_df['content_duration'], alpha)
+    movie_df['content_duration'] = movie_df['content_duration'].clip(lower=alpha)
 
     # 3) Keep only needed cols
     cols = ['content_id','content_single','content_publish_year','content_country',
