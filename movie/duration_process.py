@@ -7,7 +7,6 @@ def merge_parquet_files(duration_folder_path, merged_duration_folder_path):
         os.makedirs(merged_duration_folder_path)
     
     parquet_files = glob.glob(os.path.join(duration_folder_path, "*.parquet"))
-    print(parquet_files)
     dfs = []
     for file in parquet_files:
         try:
