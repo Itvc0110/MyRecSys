@@ -197,4 +197,7 @@ if __name__ == "__main__":
 
     end_time = time.time()
     elapsed_time = end_time - start_time
+    total_pairs = len(interaction_df)
     print(f"Elapsed time: {elapsed_time:.4f} seconds")
+    print(f"Total user-item pairs: {total_pairs}")
+    print(f"Average inference time per pair: {elapsed_time / total_pairs:.6f} seconds")

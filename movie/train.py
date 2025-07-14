@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from tqdm import tqdm
+import time
 
 
 from pathlib import Path
@@ -209,7 +210,13 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=1e-2)
     loss_fn = TriBCE_Loss()
 
+    start_time = time.time()
     for i in range(5):
         epochs = 20
         patience = 3
+
         train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=epochs, patience=patience)
+    
+    end_time = time.time()
+    elapsed = end_time - start_time
+    print(f'Elapsed time: {elapsed}')
