@@ -142,12 +142,11 @@ def validate(model, val_loader, loss_fn, device):
     auc = roc_auc_score(all_y_true, all_y_scores)
 
     # Display validation metrics
-    print('////////////////////////////////////')
-    print(f'Validation Loss: {avg_val_loss:.4f}')
+    print(f'\nValidation Loss: {avg_val_loss:.4f}')
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')
-    print(f'AUC: {auc:.4f}')
+    print(f'AUC: {auc:.4f}\n')
 
     model.train()  # Switch back to training mode
     return avg_val_loss  # Return validation loss for early stopping
