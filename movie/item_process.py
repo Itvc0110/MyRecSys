@@ -84,23 +84,10 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1):
         }
         movie_df = pd.read_csv(merged_file, dtype=dtype_spec)
 
-    # 2) Handle bad durations (logging + smoothing)
+    # 2) Drop bad durations early
     movie_df['content_duration'] = pd.to_numeric(movie_df['content_duration'], errors='coerce')
-
-    # Count categories
-    num_lt_0 = (movie_df['content_duration'] < 0).sum()
-    num_eq_0 = (movie_df['content_duration'] == 0).sum()
-    num_gt_0 = (movie_df['content_duration'] > 0).sum()
-
-    print(f"[INFO] content_duration < 0: {num_lt_0}")
-    print(f"[INFO] content_duration == 0: {num_eq_0}")
-    print(f"[INFO] content_duration > 0: {num_gt_0}")
-
-    # Smooth non-positive durations using epsilon
-    epsilon = 1.0
-    movie_df['content_duration'] = movie_df['content_duration'].apply(
-        lambda x: x if x > 0 else epsilon
-        )
+    print(movie_df['content_duration'].describe())
+    movie_df = movie_df[movie_df['content_duration'] > 0]
 
     # 3) Keep only needed cols
     cols = ['content_id','content_single','content_publish_year','content_country',
