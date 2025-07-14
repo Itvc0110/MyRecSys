@@ -40,9 +40,8 @@ def process_data(output_filepath):
             duration_df = pd.read_csv(duration)
             duration_df['content_id'] = duration_df['content_id'].astype(str)
 
-            print(f"Duration rows: {len(duration_df)}")
-            print(f"User rows: {len(user_df)}")
-            print(f"Movie rows: {len(movie_df)}")
+            print(f"\nProcessing {os.path.basename(duration)}")
+            print(f"→ Duration rows: {len(duration_df)}")
 
             merged_with_user = pd.merge(duration_df, user_df, on='username', how='inner')
             print(f"→ After user merge: {len(merged_with_user)}")
@@ -56,7 +55,7 @@ def process_data(output_filepath):
 
     if all_merged_data:
         combined_df = pd.concat(all_merged_data, ignore_index=True)
-        print(f"→ After concat: {len(combined_df)}")
+        print(f"\nTotal merged rows before drop duplicates: {len(combined_df)}")
 
         combined_df = combined_df.drop_duplicates()
         print(f"→ After drop_duplicates: {len(combined_df)}")
