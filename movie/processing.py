@@ -55,8 +55,6 @@ def process_data(output_filepath):
             print(f"Error processing {duration}: {str(e)}")
 
     if all_merged_data:
-        print(f"→ Original: {len(combined_df)}")
-
         combined_df = pd.concat(all_merged_data, ignore_index=True)
         print(f"→ After concat: {len(combined_df)}")
 
