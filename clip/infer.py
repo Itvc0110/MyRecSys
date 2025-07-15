@@ -112,11 +112,6 @@ if __name__ == "__main__":
     interaction_df = infer_user_clip_df[['username', 'content_id', 'profile_id']]
     infer_df = infer_user_clip_df.drop(columns = ['username', 'content_id', 'profile_id'], axis=1)
 
-    # Force odd input_dim for testing padding behavior/ Test
-    if infer_df.shape[1] % 2 == 0:
-        print(f"[TEST] Original input_dim is even ({infer_df.shape[1]}), adding 1 dummy column to make it odd.")
-        infer_df["__dummy_pad__"] = 0.0
-
     infer_data = infer_df.to_numpy()
     infer_data_tensor = torch.tensor(infer_data, dtype=torch.float32)
     infer_dataset = TensorDataset(infer_data_tensor)

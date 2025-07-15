@@ -177,10 +177,6 @@ if __name__ == "__main__":
     train_data = train_data.dropna()
     y = train_data["label"]
     X = train_data.drop(columns=["label"])
-    # Test, remove later
-    if X.shape[1] % 2 == 0:
-        print(f"[TEST] Original input_dim is even ({X.shape[1]}), adding 1 dummy column to make it odd.")
-        X["__dummy_pad__"] = 0.0
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
     print_class_distribution(pd.Series(y_train), "Training")
