@@ -78,9 +78,9 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
 
         y_pred = (all_y_scores > 0.5).astype(int)
 
-        precision = precision_score(all_y_true, y_pred)
-        recall = recall_score(all_y_true, y_pred)
-        f1 = f1_score(all_y_true, y_pred)
+        precision = precision_score(all_y_true, y_pred, zero_division=0)
+        recall = recall_score(all_y_true, y_pred, zero_division=0)
+        f1 = f1_score(all_y_true, y_pred, zero_division=0)
         auc = roc_auc_score(all_y_true, all_y_scores)
 
         precisions.append(precision)
@@ -135,9 +135,9 @@ def validate(model, val_loader, loss_fn, device):
 
     y_pred = (all_y_scores > 0.5).astype(int)
 
-    precision = precision_score(all_y_true, y_pred)
-    recall = recall_score(all_y_true, y_pred)
-    f1 = f1_score(all_y_true, y_pred)
+    precision = precision_score(all_y_true, y_pred, zero_division=0)
+    recall = recall_score(all_y_true, y_pred, zero_division=0)
+    f1 = f1_score(all_y_true, y_pred, zero_division=0)
     auc = roc_auc_score(all_y_true, all_y_scores)
 
     # Display validation metrics

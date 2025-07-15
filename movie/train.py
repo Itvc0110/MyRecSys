@@ -81,8 +81,8 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
 
         precision = precision_score(all_y_true, y_pred, zero_division=0)
         recall = recall_score(all_y_true, y_pred, zero_division=0)
-        f1 = f1_score(all_y_true, y_pred)
-        auc = roc_auc_score(all_y_true, all_y_scores, zero_division=0)
+        f1 = f1_score(all_y_true, y_pred, zero_division=0)
+        auc = roc_auc_score(all_y_true, all_y_scores)
 
         precisions.append(precision)
         recalls.append(recall)
