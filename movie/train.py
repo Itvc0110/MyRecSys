@@ -5,7 +5,7 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 import time
-
+import math
 
 from pathlib import Path
 from torch import nn
@@ -237,7 +237,7 @@ if __name__ == "__main__":
     model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-2)
-    loss_fn = Weighted_TriBCE_Loss(pos_weight=1)
+    loss_fn = Weighted_TriBCE_Loss(pos_weight=math.sqrt(pos_weight))
 
     start_time = time.time()
     for i in range(5):
