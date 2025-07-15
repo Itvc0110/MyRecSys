@@ -17,6 +17,15 @@ from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_sco
 model_save_dir = os.path.join(Path().resolve(), "model/clip")
 os.makedirs(model_save_dir, exist_ok=True)
 
+def print_class_distribution(y_data, name):
+    total = len(y_data)
+    class_counts = y_data.value_counts().to_dict()
+    print(f"\n{name} Data - Total Samples: {total}")
+    for label in sorted(class_counts.keys()):
+        count = class_counts[label]
+        percent = (count / total) * 100
+        print(f"  Class {label}: {count} samples ({percent:.2f}%)")
+
 def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10, patience=3):
     train_losses = []
     precisions = []
@@ -170,7 +179,8 @@ if __name__ == "__main__":
     X = train_data.drop(columns=["label"])
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
-    
+    print_class_distribution(pd.Series(y_train), "Training")
+    print_class_distribution(pd.Series(y_val), "Validation")
     X_train = X_train.to_numpy()
     y_train = y_train.to_numpy()
     X_val = X_val.to_numpy()

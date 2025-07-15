@@ -88,16 +88,6 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1):
     movie_df['content_duration'] = pd.to_numeric(movie_df['content_duration'], errors='coerce')
     #alpha = 0.1
     #movie_df['content_duration'] = movie_df['content_duration'].clip(lower=alpha)
-    num_total = len(movie_df)
-    num_lt_0 = (movie_df['content_duration'] < 0).sum()
-    num_eq_0 = (movie_df['content_duration'] == 0).sum()
-    num_bad = num_lt_0 + num_eq_0
-    percent_bad = (num_bad / num_total) * 100 if num_total > 0 else 0
-
-    print(f"[INFO] Total movie rows: {num_total}")
-    print(f"[INFO] Rows with content_duration < 0: {num_lt_0}")
-    print(f"[INFO] Rows with content_duration == 0: {num_eq_0}")
-    print(f"[INFO] Total affected rows: {num_bad} ({percent_bad:.2f}%)")
     movie_df = movie_df[movie_df['content_duration'] > 0]
 
     # 3) Keep only needed cols
