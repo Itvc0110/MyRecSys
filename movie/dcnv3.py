@@ -267,3 +267,30 @@ class TriBCE_Loss(nn.Module):
         weight_s = torch.where(weight_s > 0, weight_s, torch.zeros(1).to(weight_s.device))
         loss = loss + loss_d * weight_d + loss_s * weight_s
         return loss
+
+class Weighted_TriBCE_Loss(nn.Module):
+    def __init__(self, pos_weight=1.0):
+        super(Weighted_TriBCE_Loss, self).__init__()
+        self.pos_weight = pos_weight
+
+    def forward(self, y_pred, y_true, y_d, y_s):
+        # Compute sample weights based on true labels
+        sample_weight = torch.where(y_true == 1, self.pos_weight, 1.0)
+        
+        # Define BCE loss with sample weights
+        bce_loss = nn.BCELoss(weight=sample_weight)
+        
+        # Compute losses
+        loss = bce_loss(y_pred, y_true)
+        loss_d = bce_loss(y_d, y_true)
+        loss_s = bce_loss(y_s, y_true)
+        
+        # Compute weights for deep and shallow losses
+        weight_d = loss_d - loss
+        weight_s = loss_s - loss
+        weight_d = torch.where(weight_d > 0, weight_d, torch.zeros_like(weight_d))
+        weight_s = torch.where(weight_s > 0, weight_s, torch.zeros_like(weight_s))
+        
+        # Combine losses
+        loss = loss + loss_d * weight_d + loss_s * weight_s
+        return loss

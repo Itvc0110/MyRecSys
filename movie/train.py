@@ -12,7 +12,7 @@ from torch import nn
 from processing import process_data
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
-from dcnv3 import DCNv3, TriBCE_Loss
+from dcnv3 import DCNv3, TriBCE_Loss, Weighted_TriBCE_Loss
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
 model_save_dir = os.path.join(Path().resolve(), "model/movie")
@@ -79,10 +79,10 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
 
         y_pred = (all_y_scores > 0.5).astype(int)
 
-        precision = precision_score(all_y_true, y_pred)
-        recall = recall_score(all_y_true, y_pred)
+        precision = precision_score(all_y_true, y_pred, zero_division=0)
+        recall = recall_score(all_y_true, y_pred, zero_division=0)
         f1 = f1_score(all_y_true, y_pred)
-        auc = roc_auc_score(all_y_true, all_y_scores)
+        auc = roc_auc_score(all_y_true, all_y_scores, zero_division=0)
 
         precisions.append(precision)
         recalls.append(recall)
@@ -136,9 +136,9 @@ def validate(model, val_loader, loss_fn, device):
 
     y_pred = (all_y_scores > 0.5).astype(int)
 
-    precision = precision_score(all_y_true, y_pred)
-    recall = recall_score(all_y_true, y_pred)
-    f1 = f1_score(all_y_true, y_pred)
+    precision = precision_score(all_y_true, y_pred, zero_division=0)
+    recall = recall_score(all_y_true, y_pred, zero_division=0)
+    f1 = f1_score(all_y_true, y_pred, zero_division=0)
     auc = roc_auc_score(all_y_true, all_y_scores)
 
     # Display validation metrics
@@ -177,6 +177,7 @@ if __name__ == "__main__":
     train_data = train_data.apply(pd.to_numeric, errors='coerce')
     train_data = train_data.dropna()
     y = train_data["label"]
+    pos_weight = (len(y) - y.sum()) / y.sum()
     X = train_data.drop(columns=["label"])
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
@@ -207,7 +208,7 @@ if __name__ == "__main__":
     model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-2)
-    loss_fn = TriBCE_Loss()
+    loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
 
     start_time = time.time()
     for i in range(5):
