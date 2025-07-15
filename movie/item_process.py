@@ -130,7 +130,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
 
     # Slice movie data if needed
     if num_movie != -1:
-        movie_df = (movie_df[movie_df['content_status'] == "1"]
+        movie_df = (movie_df[movie_df['content_status'] == "1" & (movie_df['tag_names'].str.contains(r'\w', na=False))]
                     .head(num_movie)
                     .dropna(subset=['tag_names']))
 

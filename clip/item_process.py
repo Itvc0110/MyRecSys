@@ -130,7 +130,7 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
 
     # Slice clip data if needed
     if num_clip != -1:
-        clip_df = (clip_df[clip_df['content_status'] == "1"]
+        clip_df = (clip_df[(clip_df['content_status'] == "1") & (clip_df['tag_names'].str.contains(r'\w', na=False))]
                     .head(num_clip)
                     .dropna(subset=['tag_names']))
 
