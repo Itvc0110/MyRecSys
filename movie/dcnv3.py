@@ -206,8 +206,6 @@ class DCNv3(nn.Module):
         self.apply(self._init_weights)
         self.output_activation = torch.sigmoid
 
-        print(f"[DCNv3 INIT] input_dim = {input_dim}")
-
     def _init_weights(self, module):
         if isinstance(module, torch.nn.Linear):
             torch.nn.init.xavier_uniform_(module.weight)
