@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from tqdm import tqdm
+import time
 
 
 from pathlib import Path
@@ -141,11 +142,11 @@ def validate(model, val_loader, loss_fn, device):
     auc = roc_auc_score(all_y_true, all_y_scores)
 
     # Display validation metrics
-    print(f'Validation Loss: {avg_val_loss:.4f}')
+    print(f'\nValidation Loss: {avg_val_loss:.4f}')
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')
-    print(f'AUC: {auc:.4f}')
+    print(f'AUC: {auc:.4f}\n')
 
     model.train()  # Switch back to training mode
     return avg_val_loss  # Return validation loss for early stopping
@@ -167,7 +168,7 @@ if __name__ == "__main__":
     data_path = "clip/train_data/merged_user_item_duration.csv"
     data_path = os.path.join(project_root, data_path)
     if os.path.exists(data_path):
-        data = pd.read_csv(data_path, low_memory=False)
+        data = pd.read_csv(data_path)
     else:
         data = process_data(data_path)
 
@@ -176,11 +177,14 @@ if __name__ == "__main__":
     train_data = train_data.apply(pd.to_numeric, errors='coerce')
     train_data = train_data.dropna()
     y = train_data["label"]
+    pos_weight = (len(y) - y.sum()) / y.sum()
     X = train_data.drop(columns=["label"])
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+    
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
+
     X_train = X_train.to_numpy()
     y_train = y_train.to_numpy()
     X_val = X_val.to_numpy()
@@ -206,8 +210,14 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=1e-2)
     loss_fn = TriBCE_Loss()
 
+    start_time = time.time()
     for i in range(5):
         print(f"Traing run number: {i+1}")
         epochs = 20
         patience = 3
+
         train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=epochs, patience=patience)
+    
+    end_time = time.time()
+    elapsed = end_time - start_time
+    print(f'Elapsed time: {elapsed}')

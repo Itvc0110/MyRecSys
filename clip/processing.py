@@ -29,8 +29,8 @@ def process_data(output_filepath):
         merge_parquet_files(duration_folder_path, merged_duration_folder_path)
         durations = glob.glob(os.path.join(merged_duration_folder_path, "*.csv"))
 
-    user_df = process_user_data(user_path, "clip/train_data")
-    clip_df = process_clip_item(clip_data_path, "clip/train_data")
+    user_df = process_user_data(user_path, "clip/train_data", mode='train')
+    clip_df = process_clip_item(clip_data_path, "clip/train_data", mode='train')
     clip_df['content_id'] = clip_df['content_id'].astype(str)
 
     all_merged_data = []
@@ -82,8 +82,8 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip ,outpu
     user_data_path = os.path.join(project_root, user_data_path)
     clip_data_path = os.path.join(project_root, clip_data_path)
 
-    user_df = process_user_data(user_data_path, "clip/infer_data", num_user)
-    clip_df = process_clip_item(clip_data_path, "clip/infer_data", num_clip)
+    user_df = process_user_data(user_data_path, "clip/infer_data", num_user, mode='infer')
+    clip_df = process_clip_item(clip_data_path, "clip/infer_data", num_clip, mode='infer')
     user_df = user_df.head(num_user)
     clip_df = clip_df.head(num_clip)
     clip_df['content_id'] = clip_df['content_id'].astype(str)

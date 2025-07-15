@@ -203,7 +203,7 @@ class DCNv3(nn.Module):
         
         self.apply(self._init_weights)
         self.output_activation = torch.sigmoid
-        
+
     def _init_weights(self, module):
         if isinstance(module, torch.nn.Linear):
             torch.nn.init.xavier_uniform_(module.weight)

@@ -13,7 +13,7 @@ def get_tag_mapping(tags_path):
     combined_df = combined_df.drop_duplicates(inplace=False)
     combined_df.columns = combined_df.columns.str.lower()
     combined_df = combined_df.reset_index(drop=True)
-    combined_df.to_csv('clip/infer_data/tag_mapping.csv', index=False)
+    combined_df.to_csv('movie/infer_data/tag_mapping.csv', index=False)
 
     tag_mapping = {}
     for _, mapping in combined_df.iterrows():

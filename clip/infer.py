@@ -98,10 +98,10 @@ if __name__ == "__main__":
     rule_info_path = os.path.join(project_root, rule_info_path)
 
     if os.path.exists(infer_user_clip_path):
-        infer_user_clip_df = pd.read_csv(infer_user_clip_path, low_memory=False)
+        infer_user_clip_df = pd.read_csv(infer_user_clip_path)
     else:
         process_infer_data(user_data_path, clip_data_path, 10, 10000, infer_user_clip_path)
-        infer_user_clip_df = pd.read_csv(infer_user_clip_path, low_memory=False)
+        infer_user_clip_df = pd.read_csv(infer_user_clip_path)
 
     infer_user_clip_df = infer_user_clip_df.fillna(0)
     exclude = {'username', 'content_id', 'profile_id'}
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     model.load_state_dict(checkpoint["model_state_dict"])
 
     result = infer(model, infer_loader, device)
-    content_clip_df = pd.read_csv(content_clip_path, low_memory=False)
+    content_clip_df = pd.read_csv(content_clip_path)
 
     content_unique = (
         content_clip_df
