@@ -207,6 +207,7 @@ if __name__ == "__main__":
     loss_fn = TriBCE_Loss()
 
     for i in range(5):
+        print(f"Traing run number: {i+1}")
         epochs = 20
         patience = 3
         train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=epochs, patience=patience)
