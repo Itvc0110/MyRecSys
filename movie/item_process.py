@@ -58,8 +58,31 @@ def merge_content_movies(movie_data_path, output_file):
     df.to_csv(output_file, index=False)
     return df
 
-def process_movie_item(movie_data_path, output_dir, num_movie=-1):
-    # 1) Load (or merge) raw movies
+def fit_item_encoder(data, single_cols, mlb_col):
+    ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
+    ohe.fit(data[single_cols])
+    joblib.dump(ohe, Path("model/movie/encoder/item_ohe_single.joblib"))
+
+    lists = data[mlb_col].fillna("").apply(split_categories)
+    mlb = MultiLabelBinarizer(sparse_output=False)
+    mlb.fit(lists)
+    joblib.dump(mlb, Path("model/movie/encoder/item_mlb_cate.joblib"))
+
+def transform_item_data(data, single_cols, mlb_col):
+    ohe = joblib.load(Path("model/movie/encoder/item_ohe_single.joblib"))
+    mlb = joblib.load(Path("model/movie/encoder/item_mlb_cate.joblib"))
+
+    lists = data[mlb_col].fillna("").apply(split_categories)
+    ohe_arr = ohe.transform(data[single_cols])
+    mlb_arr = mlb.transform(lists)
+
+    ohe_df = pd.DataFrame(ohe_arr, columns=ohe.get_feature_names_out(single_cols), index=data.index)
+    mlb_df = pd.DataFrame(mlb_arr, columns=[f"content_cate_id_{c}" for c in mlb.classes_], index=data.index)
+    data = data.drop(single_cols + [mlb_col], axis=1)
+    return pd.concat([data, ohe_df, mlb_df], axis=1)
+
+def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
+    # Load or merge raw movie data
     project_root = Path().resolve()
     full_output_dir = project_root / output_dir
     full_output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,28 +107,35 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1):
         }
         movie_df = pd.read_csv(merged_file, dtype=dtype_spec)
 
-    # 2) Drop bad durations early
+    # Clean durations
     movie_df['content_duration'] = pd.to_numeric(movie_df['content_duration'], errors='coerce')
-    #alpha = 0.1
-    #movie_df['content_duration'] = movie_df['content_duration'].clip(lower=alpha)
     movie_df = movie_df[movie_df['content_duration'] > 0]
 
-    # 3) Keep only needed cols
+    # Keep only needed columns
     cols = ['content_id','content_single','content_publish_year','content_country',
             'type_id','tag_names','content_duration','content_status',
             'locked_level','contract','VOD_CODE','content_cate_id']
     movie_df = movie_df[cols]
 
-    # 4) One‑hot + multi‑label encode (always fit+save)
-    movie_enc = onehot_encode(movie_df).drop_duplicates()
+    # Encoder setup
+    single_cols = ["content_country", "locked_level", "VOD_CODE", "contract", "type_id"]
+    mlb_col = "content_cate_id"
 
-    # 5) Slice if needed & save
-    out = movie_enc if num_movie==-1 else (
-        movie_enc[movie_enc['content_status']=="1"]
-               .head(num_movie)
-               .dropna(subset=['tag_names'])
-               .drop('tag_names', axis=1)
-    )
-    out.to_csv(full_output_dir/"movie_item_data.csv", index=False)
+    # Train mode: fit and save encoder
+    if mode == 'train':
+        fit_item_encoder(movie_df, single_cols, mlb_col)
 
-    return movie_enc
+    # Transform with saved encoder
+    movie_df = transform_item_data(movie_df, single_cols, mlb_col)
+
+    # Slice movie data if needed
+    if num_movie != -1:
+        movie_df = (movie_df[movie_df['content_status'] == "1"]
+                    .head(num_movie)
+                    .dropna(subset=['tag_names']))
+        movie_df = movie_df.drop('tag_names', axis=1)
+
+    # Save final output
+    movie_df.to_csv(full_output_dir / "movie_item_data.csv", index=False)
+
+    return movie_df
