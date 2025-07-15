@@ -28,7 +28,7 @@ class ExponentialCrossNetwork(nn.Module):
         # Compute split size
         self.input_dim = input_dim
         self.half = input_dim // 2
-        
+
         # Initialize layers
         for i in range(num_cross_layers):
             w_layer = nn.Linear(input_dim, self.half, bias=False).to(self.device)
@@ -61,6 +61,7 @@ class ExponentialCrossNetwork(nn.Module):
 
         for i in range(self.num_cross_layers):
             H = self.w[i](x)
+
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
             if len(self.layer_norm) > i:
@@ -70,6 +71,7 @@ class ExponentialCrossNetwork(nn.Module):
                 mask = self.masker(H)
             # Concatenate and pad if necessary
             H = torch.cat([H, H * mask], dim=-1)
+
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
                 pad = H.new_zeros(H.size(0), pad_size)
@@ -137,6 +139,7 @@ class LinearCrossNetwork(nn.Module):
 
         for i in range(self.num_cross_layers):
             H = self.w[i](x)
+    
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
             if len(self.layer_norm) > i:
@@ -147,7 +150,6 @@ class LinearCrossNetwork(nn.Module):
 
             # Concatenate and pad if necessary
             H = torch.cat([H, H * mask], dim=-1)
-
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
                 pad = H.new_zeros(H.size(0), pad_size)
@@ -201,7 +203,7 @@ class DCNv3(nn.Module):
         
         self.apply(self._init_weights)
         self.output_activation = torch.sigmoid
-
+        
     def _init_weights(self, module):
         if isinstance(module, torch.nn.Linear):
             torch.nn.init.xavier_uniform_(module.weight)
@@ -241,5 +243,32 @@ class TriBCE_Loss(nn.Module):
         weight_s = loss_s - loss
         weight_d = torch.where(weight_d > 0, weight_d, torch.zeros(1).to(weight_d.device))
         weight_s = torch.where(weight_s > 0, weight_s, torch.zeros(1).to(weight_s.device))
+        loss = loss + loss_d * weight_d + loss_s * weight_s
+        return loss
+
+class Weighted_TriBCE_Loss(nn.Module):
+    def __init__(self, pos_weight=1.0):
+        super(Weighted_TriBCE_Loss, self).__init__()
+        self.pos_weight = pos_weight
+
+    def forward(self, y_pred, y_true, y_d, y_s):
+        # Compute sample weights based on true labels
+        sample_weight = torch.where(y_true == 1, self.pos_weight, 1.0)
+        
+        # Define BCE loss with sample weights
+        bce_loss = nn.BCELoss(weight=sample_weight)
+        
+        # Compute losses
+        loss = bce_loss(y_pred, y_true)
+        loss_d = bce_loss(y_d, y_true)
+        loss_s = bce_loss(y_s, y_true)
+        
+        # Compute weights for deep and shallow losses
+        weight_d = loss_d - loss
+        weight_s = loss_s - loss
+        weight_d = torch.where(weight_d > 0, weight_d, torch.zeros_like(weight_d))
+        weight_s = torch.where(weight_s > 0, weight_s, torch.zeros_like(weight_s))
+        
+        # Combine losses
         loss = loss + loss_d * weight_d + loss_s * weight_s
         return loss
