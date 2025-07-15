@@ -106,11 +106,15 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip ,outpu
 
     user_profile_df = user_profile_df.merge(user_df, on='username', how='inner')
 
+    print(f"Requested users: {num_user}, Requested movies: {num_clip}")
+    print(f"Duration-based users found: {user_profile_df['username'].nunique()}")
+
     user_profile_path = os.path.join(project_root, "clip/infer_data/user_profile_data.csv")
     os.makedirs(os.path.dirname(user_profile_path), exist_ok=True)  # Also ensure user profile dir
     user_profile_df.to_csv(user_profile_path, index=False)
 
     user_clip_df = user_profile_df.merge(clip_df, how='cross')
+    print(f"Total generated user-item pairs: {len(user_clip_df)}")
     user_clip_df.to_csv(output_filepath, index=False)
 
     return user_clip_df
