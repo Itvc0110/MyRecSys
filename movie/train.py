@@ -200,7 +200,7 @@ if __name__ == "__main__":
     class_weights = 1.0 / class_counts                    # inverse frequency
 
     # assign each sample the weight of its class
-    sample_weights = 1/2*class_weights[y_train.astype(int)]
+    sample_weights = class_weights[y_train.astype(int)]
 
 
 #############################################
@@ -237,7 +237,7 @@ if __name__ == "__main__":
     model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-2)
-    loss_fn = Weighted_TriBCE_Loss(pos_weight=1/2*pos_weight)
+    loss_fn = Weighted_TriBCE_Loss(pos_weight=1)
 
     start_time = time.time()
     for i in range(5):
