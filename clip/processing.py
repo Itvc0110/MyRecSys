@@ -46,8 +46,8 @@ def process_data(output_filepath):
             merged_with_user = pd.merge(duration_df, user_df, on='username', how='inner')
             print(f"→ After user merge: {len(merged_with_user)}")
 
-            final_merged = pd.merge(merged_with_user, movie_df, on='content_id', how='inner')
-            print(f"→ After movie merge: {len(final_merged)}")
+            final_merged = pd.merge(merged_with_user, clip_df, on='content_id', how='inner')
+            print(f"→ After clip merge: {len(final_merged)}")
 
             all_merged_data.append(final_merged)
         except Exception as e:
