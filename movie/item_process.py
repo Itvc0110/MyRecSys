@@ -133,8 +133,9 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
         movie_df = (movie_df[movie_df['content_status'] == "1"]
                     .head(num_movie)
                     .dropna(subset=['tag_names']))
-        movie_df = movie_df.drop('tag_names', axis=1)
 
+    if 'tag_names' in movie_df.columns:
+        movie_df = movie_df.drop('tag_names', axis=1)
     # Save final output
     movie_df.to_csv(full_output_dir / "movie_item_data.csv", index=False)
 
