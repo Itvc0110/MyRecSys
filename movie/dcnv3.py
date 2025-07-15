@@ -28,7 +28,9 @@ class ExponentialCrossNetwork(nn.Module):
         # Compute split size
         self.input_dim = input_dim
         self.half = input_dim // 2
-        
+
+        print(f"[ECN INIT] input_dim = {self.input_dim}, half = {self.half}")
+
         # Initialize layers
         for i in range(num_cross_layers):
             w_layer = nn.Linear(input_dim, self.half, bias=False).to(self.device)
@@ -58,9 +60,14 @@ class ExponentialCrossNetwork(nn.Module):
         # Ensure input is on the correct device
         x = x.to(self.device)
         x0 = x
-        
+
+        print(f"[ECN FORWARD] Input shape: {x.shape}")
+
         for i in range(self.num_cross_layers):
             H = self.w[i](x)
+
+            print(f"[ECN Layer {i}] H shape after w: {H.shape}")
+
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
             if len(self.layer_norm) > i:
@@ -70,8 +77,12 @@ class ExponentialCrossNetwork(nn.Module):
                 mask = self.masker(H)
             # Concatenate and pad if necessary
             H = torch.cat([H, H * mask], dim=-1)
+
+            print(f"[ECN Layer {i}] H shape after concat: {H.shape}")
+
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
+                print(f"[ECN Layer {i}] Padding with size: {pad_size}")
                 pad = H.new_zeros(H.size(0), pad_size)
                 H = torch.cat([H, pad], dim=-1)
             x = x0 * (H + self.b[i]) + x
@@ -103,6 +114,7 @@ class LinearCrossNetwork(nn.Module):
         # Compute split size
         self.input_dim = input_dim
         self.half = input_dim // 2
+        print(f"[LCN INIT] input_dim = {self.input_dim}, half = {self.half}")
         
         # Initialize layers
         for i in range(num_cross_layers):
@@ -134,9 +146,14 @@ class LinearCrossNetwork(nn.Module):
         # Ensure input is on the correct device
         x = x.to(self.device)
         x0 = x
-        
+
+        print(f"[LCN FORWARD] Input shape: {x.shape}")
+
         for i in range(self.num_cross_layers):
             H = self.w[i](x)
+
+            print(f"[LCN Layer {i}] H shape after w: {H.shape}")
+    
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
             if len(self.layer_norm) > i:
@@ -147,8 +164,14 @@ class LinearCrossNetwork(nn.Module):
 
             # Concatenate and pad if necessary
             H = torch.cat([H, H * mask], dim=-1)
+
+            print(f"[LCN Layer {i}] H shape after concat: {H.shape}")
+
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
+
+                print(f"[LCN Layer {i}] Padding with size: {pad_size}")
+
                 pad = H.new_zeros(H.size(0), pad_size)
                 H = torch.cat([H, pad], dim=-1)
 
@@ -200,6 +223,8 @@ class DCNv3(nn.Module):
         
         self.apply(self._init_weights)
         self.output_activation = torch.sigmoid
+
+        print(f"[DCNv3 INIT] input_dim = {input_dim}")
 
     def _init_weights(self, module):
         if isinstance(module, torch.nn.Linear):
