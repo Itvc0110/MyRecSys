@@ -98,16 +98,21 @@ if __name__ == "__main__":
     rule_info_path = os.path.join(project_root, rule_info_path)
 
     if os.path.exists(infer_user_movie_path):
-        infer_user_movie_df = pd.read_csv(infer_user_movie_path)
+        infer_user_movie_df = pd.read_csv(infer_user_movie_path, low_memory=False)
     else:
         process_infer_data(user_data_path, movie_data_path, 10, 10000, infer_user_movie_path)
-        infer_user_movie_df = pd.read_csv(infer_user_movie_path)
+        infer_user_movie_df = pd.read_csv(infer_user_movie_path, low_memory=False)
 
     infer_user_movie_df = infer_user_movie_df.fillna(0)
     exclude = {'username', 'content_id', 'profile_id'}
     to_convert = [col for col in infer_user_movie_df.columns if col not in exclude]
     infer_user_movie_df[to_convert] = infer_user_movie_df[to_convert].apply(pd.to_numeric, errors='coerce')
+
+    print("Rows before dropna:", len(infer_user_movie_df))
     infer_user_movie_df = infer_user_movie_df.dropna()
+    print("Rows after dropna:", len(infer_user_movie_df))
+    
+    infer_user_movie_df = infer_user_movie_df.astype({col: 'float32' for col in infer_user_movie_df.columns if col not in ['username', 'content_id', 'profile_id']})
 
     interaction_df = infer_user_movie_df[['username', 'content_id', 'profile_id']]
     infer_df = infer_user_movie_df.drop(columns = ['username', 'content_id', 'profile_id'], axis=1)
