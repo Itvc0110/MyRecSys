@@ -11,7 +11,7 @@ from pathlib import Path
 from torch import nn
 from processing import process_data
 from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
+from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3, TriBCE_Loss, Weighted_TriBCE_Loss
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
@@ -177,11 +177,13 @@ if __name__ == "__main__":
     train_data = train_data.apply(pd.to_numeric, errors='coerce')
     train_data = train_data.dropna()
     y = train_data["label"]
-    pos_weight = (len(y) - y.sum()) / y.sum()
     X = train_data.drop(columns=["label"])
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
     
+    raw_root = (len(y) - y.sum()) / y.sum()
+    pos_weight = 0.5*raw_root +0.5* math.sqrt(raw_root)
+
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
 
@@ -193,41 +195,12 @@ if __name__ == "__main__":
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32)
 
-#############################################
-
-    # y_train is a numpy array of 0/1 labels
-    class_counts = np.bincount(y_train.astype(int))      # [num_neg, num_pos]
-    class_weights = 1.0 / class_counts                    # inverse frequency
-
-    # assign each sample the weight of its class
-    sample_weights = class_weights[y_train.astype(int)]
-
-
-#############################################
-
     X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
     y_val_tensor = torch.tensor(y_val, dtype=torch.float32)
 
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
     val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-
-###############################################
-
-    sampler = WeightedRandomSampler(
-        weights=sample_weights,
-        num_samples=len(sample_weights),
-        replacement=True           # draw with replacement so we can oversample minority
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=64,
-        sampler=sampler,           # no shuffle!
-        drop_last=False
-    )
-
-
-    #train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
     input_dim = X_train_tensor.shape[1]
@@ -237,7 +210,7 @@ if __name__ == "__main__":
     model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-2)
-    loss_fn = Weighted_TriBCE_Loss(pos_weight=1)
+    loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
 
     start_time = time.time()
     for i in range(5):
