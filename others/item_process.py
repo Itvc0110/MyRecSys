@@ -144,5 +144,7 @@ def process_other_item(other_data_path, output_dir, num_other=-1, mode='train'):
         other_df = other_df.drop('tag_names', axis=1)
     # Save final output
     other_df.to_csv(full_output_dir / "other_item_data.csv", index=False)
-
+    if other_df.empty:
+        print("[WARNING] No valid content rows found in other_df after filtering. Skipping processing.")
+        return pd.DataFrame()
     return other_df
