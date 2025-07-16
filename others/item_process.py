@@ -46,8 +46,8 @@ def onehot_encode(data):
 def merge_content_others(other_data_path, output_file):
     # unchanged from original…
 
-    prefixes = ["album_", 
-                #"short_", 
+    prefixes = [#"album_", 
+                "short_", 
                 #"content_livestream", 
                 #"content_series_", 
                 #"movie_serires_"
