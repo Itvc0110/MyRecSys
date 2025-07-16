@@ -45,15 +45,7 @@ def onehot_encode(data):
 
 def merge_content_movies(movie_data_path, output_file):
     # unchanged from original…
-    prefixes = ["content_movie_", "content_series_", "movie_series_"]
-    movie_files = []
-    
-    for prefix in prefixes:
-        pattern = os.path.join(movie_data_path, f"**/{prefix}*.json")
-        matched = glob.glob(pattern, recursive=True)
-        print(f"  → {prefix}: {len(matched)} files")
-        movie_files.extend(matched)
-
+    movie_files = glob.glob(f'{movie_data_path}/**/content_movie_*.json', recursive=True)
     all_data = []
     for f in movie_files:
         try:

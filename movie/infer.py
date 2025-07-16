@@ -67,6 +67,7 @@ def infer(model, data, device):
             inputs = batch[0].to(device)
             outputs = model(inputs)
             predictions.extend(outputs['y_pred'].detach().cpu().numpy())
+            torch.cuda.emty_cache()
 
     return predictions
 
@@ -100,7 +101,7 @@ if __name__ == "__main__":
     if os.path.exists(infer_user_movie_path):
         infer_user_movie_df = pd.read_csv(infer_user_movie_path, low_memory=False)
     else:
-        process_infer_data(user_data_path, movie_data_path, 10, 10000, infer_user_movie_path)
+        process_infer_data(user_data_path, movie_data_path, -1, -1, infer_user_movie_path)
         infer_user_movie_df = pd.read_csv(infer_user_movie_path, low_memory=False)
 
     infer_user_movie_df = infer_user_movie_df.fillna(0)
