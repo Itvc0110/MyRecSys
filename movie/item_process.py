@@ -47,9 +47,12 @@ def merge_content_movies(movie_data_path, output_file):
     # unchanged from original…
     prefixes = ["content_movie_", "content_series_", "movie_series_"]
     movie_files = []
+    
     for prefix in prefixes:
         pattern = os.path.join(movie_data_path, f"**/{prefix}*.json")
-        movie_files.extend(glob.glob(pattern, recursive=True))
+        matched = glob.glob(pattern, recursive=True)
+        print(f"  → {prefix}: {len(matched)} files")
+        movie_files.extend(matched)
 
     all_data = []
     for f in movie_files:
