@@ -65,6 +65,23 @@ def merge_content_others(other_data_path, output_file):
     return df
 
 def fit_item_encoder(data, single_cols, mlb_col):
+
+#################################
+    required_cols = set(single_cols + [mlb_col])
+    missing_cols = required_cols - set(data.columns)
+    if missing_cols:
+        print(f"[ERROR] Missing required columns: {missing_cols}")
+        print(f"[DEBUG] Available columns: {list(data.columns)}")
+        return
+    if data.empty:
+        print("[WARNING] Skipping fit_item_encoder — input data is empty.")
+        return
+
+    if data[single_cols].dropna().shape[0] == 0:
+        print("[WARNING] Skipping fit_item_encoder — no valid rows in single-valued columns.")
+        return
+#################################
+
     ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
     ohe.fit(data[single_cols])
     joblib.dump(ohe, Path("model/other/encoder/item_ohe_single.joblib"))
