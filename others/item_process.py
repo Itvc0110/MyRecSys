@@ -130,6 +130,27 @@ def process_other_item(other_data_path, output_dir, num_other=-1, mode='train'):
         }
         other_df = pd.read_csv(merged_file, dtype=dtype_spec)
 
+##########################################
+    # Initial row count
+    print(f"[DEBUG] Initial rows: {len(other_df)}")
+
+    # Simulate: content_duration > 0
+    dur_filtered = other_df[pd.to_numeric(other_df['content_duration'], errors='coerce') > 0]
+    print(f"[DEBUG] Rows with content_duration > 0: {len(dur_filtered)}")
+
+    # Simulate: content_status == '1'
+    status_filtered = other_df[other_df['content_status'] == "1"]
+    print(f"[DEBUG] Rows with content_status == '1': {len(status_filtered)}")
+
+    # Simulate: tag_names.str.contains(r'\w', na=False)
+    tagname_filtered = other_df[other_df['tag_names'].str.contains(r'\w', na=False)]
+    print(f"[DEBUG] Rows with tag_names containing word characters: {len(tagname_filtered)}")
+
+    # Simulate: dropna(subset=['tag_names'])
+    notna_filtered = other_df.dropna(subset=['tag_names'])
+    print(f"[DEBUG] Rows with non-null tag_names: {len(notna_filtered)}")
+##########################################
+
     # Clean durations
     other_df['content_duration'] = pd.to_numeric(other_df['content_duration'], errors='coerce')
     other_df = other_df[other_df['content_duration'] > 0]
