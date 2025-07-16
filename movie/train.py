@@ -168,7 +168,7 @@ if __name__ == "__main__":
     data_path = "movie/train_data/merged_user_item_duration.csv"
     data_path = os.path.join(project_root, data_path)
     if os.path.exists(data_path):
-        data = pd.read_csv(data_path)
+        data = pd.read_csv(data_path, low_memory=False)
     else:
         data = process_data(data_path)
 
@@ -209,14 +209,14 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-2)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
 
     start_time = time.time()
     for i in range(5):
-        print(f"Traing run number: {i+1}")
+        print(f"\nTraining Run no.{i+1}\n")
         epochs = 20
-        patience = 3
+        patience = 5
 
         train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=epochs, patience=patience)
     

@@ -37,7 +37,7 @@ def process_data(output_filepath):
 
     for duration in durations:
         try:
-            duration_df = pd.read_csv(duration)
+            duration_df = pd.read_csv(duration, low_memory=False)
             duration_df['content_id'] = duration_df['content_id'].astype(str)
 
             print(f"\nProcessing {os.path.basename(duration)}")
@@ -94,7 +94,7 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie ,out
     user_profile_list = []
     for duration in durations:
         try:
-            duration_df = pd.read_csv(duration)
+            duration_df = pd.read_csv(duration, low_memory=False)
             unique_pairs_df = duration_df[['username', 'profile_id']].drop_duplicates()
             user_profile_list.append(unique_pairs_df)
         except Exception as e:

@@ -107,11 +107,7 @@ if __name__ == "__main__":
     exclude = {'username', 'content_id', 'profile_id'}
     to_convert = [col for col in infer_user_movie_df.columns if col not in exclude]
     infer_user_movie_df[to_convert] = infer_user_movie_df[to_convert].apply(pd.to_numeric, errors='coerce')
-
-    print("Rows before dropna:", len(infer_user_movie_df))
     infer_user_movie_df = infer_user_movie_df.dropna()
-    print("Rows after dropna:", len(infer_user_movie_df))
-    
     infer_user_movie_df = infer_user_movie_df.astype({col: 'float32' for col in infer_user_movie_df.columns if col not in ['username', 'content_id', 'profile_id']})
 
     interaction_df = infer_user_movie_df[['username', 'content_id', 'profile_id']]
@@ -131,7 +127,7 @@ if __name__ == "__main__":
     model.load_state_dict(checkpoint["model_state_dict"])
 
     result = infer(model, infer_loader, device)
-    content_movie_df = pd.read_csv(content_movie_path)
+    content_movie_df = pd.read_csv(content_movie_path, low_memory=False)
 
     content_unique = (
         content_movie_df

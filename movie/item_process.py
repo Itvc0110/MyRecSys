@@ -45,7 +45,12 @@ def onehot_encode(data):
 
 def merge_content_movies(movie_data_path, output_file):
     # unchanged from original…
-    movie_files = glob.glob(f'{movie_data_path}/**/content_movie_*.json', recursive=True)
+    prefixes = ["content_movie_", "content_series_", "movie_serires_"]
+    movie_files = []
+    for prefix in prefixes:
+        pattern = os.path.join(movie_data_path, f"**/{prefix}*.json")
+        movie_files.extend(glob.glob(pattern, recursive=True))
+        
     all_data = []
     for f in movie_files:
         try:
@@ -130,7 +135,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
 
     # Slice movie data if needed
     if num_movie != -1:
-        movie_df = (movie_df[movie_df['content_status'] == "1" & (movie_df['tag_names'].str.contains(r'\w', na=False))]
+        movie_df = (movie_df[(movie_df['content_status'] == "1") & (movie_df['tag_names'].str.contains(r'\w', na=False))]
                     .head(num_movie)
                     .dropna(subset=['tag_names']))
 
