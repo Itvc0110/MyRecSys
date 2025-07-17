@@ -5,7 +5,7 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 import time
-
+import math
 
 from pathlib import Path
 from torch import nn
@@ -177,11 +177,13 @@ if __name__ == "__main__":
     train_data = train_data.apply(pd.to_numeric, errors='coerce')
     train_data = train_data.dropna()
     y = train_data["label"]
-    pos_weight = (len(y) - y.sum()) / y.sum()
     X = train_data.drop(columns=["label"])
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
-    
+
+    raw_root = (len(y) - y.sum()) / y.sum()
+    pos_weight = 0.5*raw_root + math.sqrt(raw_root)
+
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
 
