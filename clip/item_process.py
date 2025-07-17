@@ -45,7 +45,7 @@ def onehot_encode(data):
 
 def merge_content_clips(clip_data_path, output_file):
     # unchanged from original…
-    clip_files = glob.glob(f'{clip_data_path}/**/movie_clip_*.json', recursive=True)
+    clip_files = glob.glob(f'{clip_data_path}/**/content_movie_*.json', recursive=True)
     all_data = []
     for f in clip_files:
         try:
