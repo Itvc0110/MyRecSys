@@ -75,7 +75,7 @@ def process_data(output_filepath):
 
 
 def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, output_dir_path,
-                    user_batch_size=10, chunk_size=200000):
+                    user_batch_size=10, chunk_size=200000, max_files=-1):
     project_root = Path().resolve()
     output_dir = os.path.join(project_root, output_dir_path)
     os.makedirs(output_dir, exist_ok=True)
@@ -114,12 +114,16 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
         estimated_total_files += ceil(cross_rows / chunk_size)
 
     print(f" Estimated output files: {estimated_total_files} ({user_chunk_count} user chunks, {len(clip_df)} clips, file size: {chunk_size})")
-
+    print(f"Creating {max_files if max_files!=-1 else "as estimated"} files")
     # Chunked cross-merge and save
     file_index = 0
     for i in range(0, len(user_profile_df), user_batch_size):
         user_chunk = user_profile_df.iloc[i:i+user_batch_size]
         cross_chunk = user_chunk.merge(clip_df, how="cross")
+
+        if max_files > 0 and file_index >= max_files:
+            print(f"Max file limit reached: {max_files} files created.")
+            return
 
         for j in range(0, len(cross_chunk), chunk_size):
             start_time = time()
