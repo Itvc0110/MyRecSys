@@ -114,7 +114,7 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
         estimated_total_files += ceil(cross_rows / chunk_size)
 
     print(f" Estimated output files: {estimated_total_files} ({user_chunk_count} user chunks, {len(clip_df)} clips, file size: {chunk_size})")
-    print(f"Creating {max_files if max_files!=-1 else "as estimated"} files")
+    print(f"Creating {max_files if max_files != -1 else 'as many as needed'} files...")
     # Chunked cross-merge and save
     file_index = 0
     for i in range(0, len(user_profile_df), user_batch_size):
