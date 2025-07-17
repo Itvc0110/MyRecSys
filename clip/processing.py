@@ -2,6 +2,7 @@ from duration_process import merge_parquet_files
 from item_process import process_clip_item
 from user_process import process_user_data
 import glob
+from math import ceil
 import os
 from pathlib import Path
 import pandas as pd
@@ -72,45 +73,47 @@ def process_data(output_filepath):
         return
 
 
-def process_infer_data(user_data_path, clip_data_path, num_user, num_clip ,output_filepath):
-    project_root = Path().resolve()
-    output_filepath = os.path.join(project_root, output_filepath)
+    def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, output_dir_path,
+                       user_batch_size=1000, chunk_size=200_000):
+        project_root = Path().resolve()
+        output_dir = os.path.join(project_root, output_dir_path)
+        os.makedirs(output_dir, exist_ok=True)
 
-    output_dir = os.path.dirname(output_filepath)
-    os.makedirs(output_dir, exist_ok=True)
+        user_df = process_user_data(user_data_path, output_dir_path, num_user, mode='infer').head(num_user)
+        clip_df = process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer').head(num_clip)
+        clip_df['content_id'] = clip_df['content_id'].astype(str)
 
-    user_data_path = os.path.join(project_root, user_data_path)
-    clip_data_path = os.path.join(project_root, clip_data_path)
+        # Read profile IDs (avoid memory explosion)
+        merged_duration_folder_path = os.path.join(project_root, "clip/merged_duration")
+        durations = glob.glob(os.path.join(merged_duration_folder_path, "*.csv"))
+        user_profile_list = []
+        for duration in durations:
+            try:
+                df = pd.read_csv(duration, usecols=["username", "profile_id"])
+                user_profile_list.append(df.drop_duplicates())
+            except Exception as e:
+                print(f"Error processing {duration}: {str(e)}")
 
-    user_df = process_user_data(user_data_path, "clip/infer_data", num_user, mode='infer')
-    clip_df = process_clip_item(clip_data_path, "clip/infer_data", num_clip, mode='infer')
-    user_df = user_df.head(num_user)
-    clip_df = clip_df.head(num_clip)
-    clip_df['content_id'] = clip_df['content_id'].astype(str)
+        if not user_profile_list:
+            return
 
-    merged_duration_folder_path = "clip/merged_duration"
-    merged_duration_folder_path = os.path.join(project_root, merged_duration_folder_path)
-    durations = glob.glob(os.path.join(merged_duration_folder_path, "*.csv"))
-    user_profile_list = []
-    for duration in durations:
-        try:
-            duration_df = pd.read_csv(duration)
-            unique_pairs_df = duration_df[['username', 'profile_id']].drop_duplicates()
-            user_profile_list.append(unique_pairs_df)
-        except Exception as e:
-            print(f"Error processing {duration}: {str(e)}")
-    
-    if user_profile_list:
-        user_profile_df = pd.concat(user_profile_list, ignore_index=True)
-        user_profile_df = user_profile_df.drop_duplicates()
+        user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
+        user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
 
-    user_profile_df = user_profile_df.merge(user_df, on='username', how='inner')
+        # Save user_profile_df once for reference
+        user_profile_path = os.path.join(output_dir, "user_profile_data.csv")
+        user_profile_df.to_csv(user_profile_path, index=False)
 
-    user_profile_path = os.path.join(project_root, "clip/infer_data/user_profile_data.csv")
-    os.makedirs(os.path.dirname(user_profile_path), exist_ok=True)  # Also ensure user profile dir
-    user_profile_df.to_csv(user_profile_path, index=False)
+        # Chunked cross-merge and save
+        file_index = 0
+        for i in range(0, len(user_profile_df), user_batch_size):
+            user_chunk = user_profile_df.iloc[i:i+user_batch_size]
+            cross_chunk = user_chunk.merge(clip_df, how="cross")
 
-    user_clip_df = user_profile_df.merge(clip_df, how='cross')
-    user_clip_df.to_csv(output_filepath, index=False)
+            for j in range(0, len(cross_chunk), chunk_size):
+                sub_chunk = cross_chunk.iloc[j:j+chunk_size]
+                part_file = os.path.join(output_dir, f"infer_user_clip_part_{file_index}.csv")
+                sub_chunk.to_csv(part_file, index=False)
+                file_index += 1
 
-    return user_clip_df
+        print(f"✅ Saved {file_index} part files to {output_dir}")
