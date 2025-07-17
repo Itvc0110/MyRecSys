@@ -104,6 +104,16 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     user_profile_path = os.path.join(output_dir, "user_profile_data.csv")
     user_profile_df.to_csv(user_profile_path, index=False)
 
+    # COunting files
+    user_chunk_count = ceil(len(user_profile_df) / user_batch_size)
+    estimated_total_files = 0
+    for i in range(user_chunk_count):
+        actual_user_chunk = min(user_batch_size, len(user_profile_df) - i * user_batch_size)
+        cross_rows = actual_user_chunk * len(clip_df)
+        estimated_total_files += ceil(cross_rows / chunk_size)
+
+    print(f" Estimated output files: {estimated_total_files} ({user_chunk_count} user chunks, {len(clip_df)} clips)")
+
     # Chunked cross-merge and save
     file_index = 0
     for i in range(0, len(user_profile_df), user_batch_size):
@@ -114,6 +124,6 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
             sub_chunk = cross_chunk.iloc[j:j+chunk_size]
             part_file = os.path.join(output_dir, f"infer_user_clip_part_{file_index}.csv")
             sub_chunk.to_csv(part_file, index=False)
-            print(f"✅ Saved: {part_file} ({len(sub_chunk)} rows)")
+            print(f"Saved: {part_file} ({len(sub_chunk)} rows)")
             file_index += 1
 
