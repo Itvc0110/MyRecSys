@@ -7,6 +7,7 @@ from math import ceil
 import os
 from pathlib import Path
 import pandas as pd
+import polars as pl
 
 def process_data(output_filepath):
     project_root = Path().resolve()
@@ -118,8 +119,11 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     # Chunked cross-merge and save
     file_index = 0
     for i in range(0, len(user_profile_df), user_batch_size):
-        user_chunk = user_profile_df.iloc[i:i+user_batch_size]
-        cross_chunk = user_chunk.merge(clip_df, how="cross")
+        user_chunk_pd = user_profile_df.iloc[i:i+user_batch_size]
+        user_chunk = pl.from_pandas(user_chunk_pd)
+        clip_pl = pl.from_pandas(clip_df)
+
+        cross_chunk = user_chunk.join(clip_pl, how="cross")
 
         if max_files > 0 and file_index >= max_files:
             print(f"Max file limit reached: {max_files} files created.")
@@ -127,9 +131,9 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
 
         for j in range(0, len(cross_chunk), chunk_size):
             start_time = time()
-            sub_chunk = cross_chunk.iloc[j:j+chunk_size]
+            sub_chunk = cross_chunk.slice(j, chunk_size)
             part_file = os.path.join(output_dir, f"infer_user_clip_part_{file_index}.csv")
-            sub_chunk.to_csv(part_file, index=False)
+            sub_chunk.write_csv(part_file)
             elapsed = time() - start_time
             print(f"Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f} sec")
             file_index += 1
