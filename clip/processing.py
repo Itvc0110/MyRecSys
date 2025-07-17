@@ -74,7 +74,7 @@ def process_data(output_filepath):
 
 
 def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, output_dir_path,
-                    user_batch_size=1000, chunk_size=200_000):
+                    user_batch_size=10, chunk_size=200000):
     project_root = Path().resolve()
     output_dir = os.path.join(project_root, output_dir_path)
     os.makedirs(output_dir, exist_ok=True)
