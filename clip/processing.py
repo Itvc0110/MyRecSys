@@ -114,6 +114,6 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
             sub_chunk = cross_chunk.iloc[j:j+chunk_size]
             part_file = os.path.join(output_dir, f"infer_user_clip_part_{file_index}.csv")
             sub_chunk.to_csv(part_file, index=False)
+            print(f"✅ Saved {file_index} part files to {output_dir}")
             file_index += 1
 
-    print(f"✅ Saved {file_index} part files to {output_dir}")
