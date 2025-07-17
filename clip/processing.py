@@ -2,6 +2,7 @@ from duration_process import merge_parquet_files
 from item_process import process_clip_item
 from user_process import process_user_data
 import glob
+from time import time
 from math import ceil
 import os
 from pathlib import Path
@@ -112,7 +113,7 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
         cross_rows = actual_user_chunk * len(clip_df)
         estimated_total_files += ceil(cross_rows / chunk_size)
 
-    print(f" Estimated output files: {estimated_total_files} ({user_chunk_count} user chunks, {len(clip_df)} clips)")
+    print(f" Estimated output files: {estimated_total_files} ({user_chunk_count} user chunks, {len(clip_df)} clips, file size: {chunk_size})")
 
     # Chunked cross-merge and save
     file_index = 0
@@ -121,9 +122,11 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
         cross_chunk = user_chunk.merge(clip_df, how="cross")
 
         for j in range(0, len(cross_chunk), chunk_size):
+            start_time = time()
             sub_chunk = cross_chunk.iloc[j:j+chunk_size]
             part_file = os.path.join(output_dir, f"infer_user_clip_part_{file_index}.csv")
             sub_chunk.to_csv(part_file, index=False)
-            print(f"Saved: {part_file} ({len(sub_chunk)} rows)")
+            elapsed = time() - start_time
+            print(f"Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f} sec")
             file_index += 1
 
