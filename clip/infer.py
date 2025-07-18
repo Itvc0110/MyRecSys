@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
         merge_start = time.time()
 
-        user_batch = pl.from_pandas(user_profile_df.iloc[i:i+user_batch_size].copy())
+        user_batch = user_profile_df.slice(i, user_batch_size)
         user_batch = user_batch.with_columns(pl.lit(1).alias("key"))
         clip_df = clip_df.with_columns(pl.lit(1).alias("key"))
         cross_df = user_batch.join(clip_df, on="key").drop("key")
