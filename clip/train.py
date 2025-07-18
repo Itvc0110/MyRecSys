@@ -214,7 +214,7 @@ if __name__ == "__main__":
 
     start_time = time.time()
     for i in range(5):
-        print(f"Traing run number: {i+1}")
+        print(f"Training run no.{i+1}")
         epochs = 20
         patience = 3
 
