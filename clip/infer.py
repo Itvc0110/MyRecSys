@@ -67,10 +67,10 @@ if __name__ == "__main__":
     rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
     rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
-    part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip_part_*.parquet")))
+    part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip/infer_user_clip_part_*.parquet")))
     if not part_files:
         process_infer_data(user_data_path, clip_data_path, -1, -1, "clip/infer_data")
-        part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip_part_*.parquet")))
+        part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip/infer_user_clip_part_*.parquet")))
 
     checkpoint_path = "model/clip/best_model.pth"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

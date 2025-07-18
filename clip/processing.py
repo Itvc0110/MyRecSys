@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 
+
 def process_data(output_filepath):
     project_root = Path().resolve()
 
@@ -81,6 +82,9 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     output_dir = os.path.join(project_root, output_dir_path)
     os.makedirs(output_dir, exist_ok=True)
 
+    infer_subdir = os.path.join(output_dir, "infer_user_clip")
+    os.makedirs(infer_subdir, exist_ok=True)
+
     user_df = process_user_data(user_data_path, output_dir_path, num_user, mode='infer').head(num_user)
     clip_df = process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer').head(num_clip)
     clip_df['content_id'] = clip_df['content_id'].astype(str)
@@ -132,9 +136,10 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
         for j in range(0, len(cross_chunk), chunk_size):
             start_time = time()
             sub_chunk = cross_chunk.slice(j, chunk_size)
-            part_file = os.path.join(output_dir, f"infer_user_clip_part_{file_index}.parquet")
+            part_file = os.path.join(infer_subdir, f"infer_user_clip_part_{file_index}.parquet")
             sub_chunk.write_parquet(part_file)  
             elapsed = time() - start_time
-            print(f"Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f} sec")
+            if file_index % 20 == 0:
+                print(f"Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f} sec")
             file_index += 1
 
