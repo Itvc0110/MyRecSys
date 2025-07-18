@@ -69,7 +69,8 @@ if __name__ == "__main__":
 
     part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip/infer_user_clip_part_*.parquet")))
     if not part_files:
-        process_infer_data(user_data_path, clip_data_path, -1, -1, "clip/infer_data")
+        process_infer_data(user_data_path, clip_data_path, num_user=-1, num_clip=-1, output_dir_path="clip/infer_data",
+                           user_batch_size=10, chunk_size=200000, max_files=10000)
         part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip/infer_user_clip_part_*.parquet")))
 
     checkpoint_path = "model/clip/best_model.pth"

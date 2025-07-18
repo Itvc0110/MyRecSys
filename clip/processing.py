@@ -119,7 +119,7 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
         estimated_total_files += ceil(cross_rows / chunk_size)
 
     print(f" Estimated output files: {estimated_total_files} ({user_chunk_count} user chunks, {len(clip_df)} clips, file size: {chunk_size})")
-    print(f"Creating {max_files if max_files != -1 else 'as many as needed'} files...")
+    print(f"Creating {max_files if max_files != -1 else 'as many as needed'} files (about {max_files/estimated_total_files*100}%)...")
     # Chunked cross-merge and save
     file_index = 0
     for i in range(0, len(user_profile_df), user_batch_size):
@@ -139,7 +139,7 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
             part_file = os.path.join(infer_subdir, f"infer_user_clip_part_{file_index}.parquet")
             sub_chunk.write_parquet(part_file)  
             elapsed = time() - start_time
-            if file_index % 20 == 0:
+            if file_index % 50 == 0:
                 print(f"Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f} sec")
             file_index += 1
 
