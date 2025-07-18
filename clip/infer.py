@@ -111,8 +111,8 @@ if __name__ == "__main__":
 
         user_batch = user_profile_df.slice(i, user_batch_size)
         user_batch = user_batch.with_columns(pl.lit(1).alias("key"))
-        clip_df = clip_df.with_columns(pl.lit(1).alias("key"))
-        cross_df = user_batch.join(clip_df, on="key").drop("key")
+        clip_df_batch = clip_df.with_columns(pl.lit(1).alias("key"))
+        cross_df = user_batch.join(clip_df_batch, on="key").drop("key")
 
         print(f"Cross-merged size: {len(cross_df)} rows (≈ {len(user_batch)} users × {len(clip_df)} clips)")
         print(f"Merge time: {time.time() - merge_start:.2f} sec")
@@ -128,6 +128,10 @@ if __name__ == "__main__":
         feature_df = feature_df.drop_nulls()
 
         features_np = feature_df.to_numpy()
+        ##########################################
+        assert features_np.shape[1] == expected_input_dim, \
+        f"Expected input dim: {expected_input_dim}, but got: {features_np.shape[1]}"
+        #########################################
         infer_tensor = torch.tensor(features_np, dtype=torch.float32)
         infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=infer_batch_size, shuffle=False)
 
