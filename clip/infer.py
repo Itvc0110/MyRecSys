@@ -6,9 +6,10 @@ import json
 import time
 from pathlib import Path
 from glob import glob
+import pandas as pd
 
-from item_process import process_clip_item
-from user_process import process_user_data
+from item_process import process_clip_item, transform_item_data
+from user_process import process_user_data, transform_user_data
 from dcnv3 import DCNv3
 from rule_process import get_rulename
 from torch.utils.data import DataLoader, TensorDataset
@@ -71,8 +72,19 @@ if __name__ == "__main__":
     rulename_json_path = project_root / "clip/result/rulename.json"
     rule_content_path = project_root / "clip/result/rule_content.txt"
 
-    user_df = pl.from_pandas(process_user_data(user_data_path, "clip/infer_data", -1, mode='infer'))
-    clip_df = pl.from_pandas(process_clip_item(clip_data_path, "clip/infer_data", -1, mode='infer'))
+    user_df_raw = process_user_data(user_data_path, "clip/infer_data", -1, mode='infer')
+    clip_df_raw = process_clip_item(clip_data_path, "clip/infer_data", -1, mode='infer')
+
+    # Apply saved encoders (same as used in training)
+    user_df_encoded = transform_user_data(user_df_raw, ["province", "package_code"])
+    clip_df_encoded = transform_item_data(clip_df_raw,
+        ["content_country", "locked_level", "VOD_CODE", "contract", "type_id"],
+        "content_cate_id"
+    )
+
+    user_df = pl.from_pandas(user_df_encoded)
+    clip_df = pl.from_pandas(clip_df_encoded)
+
     clip_df = clip_df.with_columns(pl.col("content_id").cast(pl.Utf8))
 
     duration_files = glob(str(project_root / "clip/merged_duration/*.parquet"))
