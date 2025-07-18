@@ -27,10 +27,10 @@ def process_data(output_filepath):
     clip_data_path = "mytv_vmp_content"
     clip_data_path = os.path.join(project_root, clip_data_path)
 
-    durations = glob.glob(os.path.join(merged_duration_folder_path, "*.csv"))
+    durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
     if len(durations)<1:
         merge_parquet_files(duration_folder_path, merged_duration_folder_path)
-        durations = glob.glob(os.path.join(merged_duration_folder_path, "*.csv"))
+        durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
 
     user_df = process_user_data(user_path, "clip/train_data", mode='train')
     clip_df = process_clip_item(clip_data_path, "clip/train_data", mode='train')
@@ -40,7 +40,7 @@ def process_data(output_filepath):
 
     for duration in durations:
         try:
-            duration_df = pd.read_csv(duration)
+            duration_df = pd.read_parquet(duration)
             duration_df['content_id'] = duration_df['content_id'].astype(str)
 
             print(f"\nProcessing {os.path.basename(duration)}")
@@ -69,7 +69,7 @@ def process_data(output_filepath):
         combined_df['label'] = (combined_df['percent_duration'] > 0.3).astype(int)
         combined_df = combined_df.drop(columns=['percent_duration', 'duration'], inplace=False)
         
-        combined_df.to_csv(output_filepath, index=False)
+        combined_df.to_parquet(output_filepath, index=False)
         return combined_df
     else:
         return
@@ -87,11 +87,11 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
 
     # Read profile IDs (avoid memory explosion)
     merged_duration_folder_path = os.path.join(project_root, "clip/merged_duration")
-    durations = glob.glob(os.path.join(merged_duration_folder_path, "*.csv"))
+    durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
     user_profile_list = []
     for duration in durations:
         try:
-            df = pd.read_csv(duration, usecols=["username", "profile_id"])
+            df = pd.read_parquet(duration, usecols=["username", "profile_id"])
             user_profile_list.append(df.drop_duplicates())
         except Exception as e:
             print(f"Error processing {duration}: {str(e)}")
@@ -103,8 +103,8 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
 
     # Save user_profile_df once for reference
-    user_profile_path = os.path.join(output_dir, "user_profile_data.csv")
-    user_profile_df.to_csv(user_profile_path, index=False)
+    user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
+    user_profile_df.to_parquet(user_profile_path, index=False)
 
     # COunting files
     user_chunk_count = ceil(len(user_profile_df) / user_batch_size)
@@ -132,8 +132,8 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
         for j in range(0, len(cross_chunk), chunk_size):
             start_time = time()
             sub_chunk = cross_chunk.slice(j, chunk_size)
-            part_file = os.path.join(output_dir, f"infer_user_clip_part_{file_index}.csv")
-            sub_chunk.write_csv(part_file)
+            part_file = os.path.join(output_dir, f"infer_user_clip_part_{file_index}.parquet")
+            sub_chunk.write_parquet(part_file)  
             elapsed = time() - start_time
             print(f"Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f} sec")
             file_index += 1

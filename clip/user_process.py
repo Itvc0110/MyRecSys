@@ -47,8 +47,8 @@ def process_user_data(data_path, output_dir, num_user=-1, mode='train'):
     if num_user != -1:
         user_data = user_data.head(num_user)
 
-    user_data_path = os.path.join(Path().resolve(), output_dir, "user_data.csv")
+    user_data_path = os.path.join(Path().resolve(), output_dir, "user_data.parquet")
     os.makedirs(os.path.dirname(user_data_path), exist_ok=True)
-    user_data.to_csv(user_data_path, index=False)
+    user_data.to_parquet(user_data_path, index=False)
 
     return user_data

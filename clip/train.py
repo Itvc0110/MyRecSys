@@ -165,10 +165,10 @@ def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
 
 if __name__ == "__main__":
     project_root = Path().resolve()
-    data_path = "clip/train_data/merged_user_item_duration.csv"
+    data_path = "clip/train_data/merged_user_item_duration.parquet"
     data_path = os.path.join(project_root, data_path)
     if os.path.exists(data_path):
-        data = pd.read_csv(data_path)
+        data = pd.read_parquet(data_path)
     else:
         data = process_data(data_path)
 

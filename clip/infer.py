@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
     clip_data_path = os.path.join(project_root, "mytv_vmp_content")
-    content_clip_path = os.path.join(project_root, "clip/infer_data/merged_content_clips.csv")
+    content_clip_path = os.path.join(project_root, "clip/infer_data/merged_content_clips.parquet")
     tags_path = os.path.join(project_root, "tags")
     rule_info_path = os.path.join(project_root, "rule_info.parquet")
 
@@ -67,10 +67,10 @@ if __name__ == "__main__":
     rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
     rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
-    part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip_part_*.csv")))
+    part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip_part_*.parquet")))
     if not part_files:
         process_infer_data(user_data_path, clip_data_path, -1, -1, "clip/infer_data")
-        part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip_part_*.csv")))
+        part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip_part_*.parquet")))
 
     checkpoint_path = "model/clip/best_model.pth"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     total_pairs = 0
 
     for part_file in part_files:
-        df = pd.read_csv(part_file).fillna(0)
+        df = pd.read_parquet(part_file).fillna(0)
         exclude = {'username', 'content_id', 'profile_id'}
         to_convert = [col for col in df.columns if col not in exclude]
         df[to_convert] = df[to_convert].apply(pd.to_numeric, errors='coerce')
@@ -110,7 +110,7 @@ if __name__ == "__main__":
             }
             result_dict[pid]['user'] = {'username': user, 'profile_id': pid}
 
-    content_clip_df = pd.read_csv(content_clip_path)
+    content_clip_df = pd.read_parquet(content_clip_path)
     content_unique = content_clip_df.drop_duplicates(subset='content_id').set_index('content_id')
 
     for pid in result_dict:
