@@ -93,8 +93,8 @@ if __name__ == "__main__":
     result_dict = {}
     total_pairs = 0
 
-    user_batch_size = 64 
-    infer_batch_size=64
+    user_batch_size = 10
+    infer_batch_size= 64
     print(f"User batch size: {user_batch_size}")
     print(f"Inference batch size: {infer_batch_size}")
 
