@@ -120,7 +120,14 @@ if __name__ == "__main__":
         interaction_df = cross_df.select(['username', 'content_id', 'profile_id']).to_pandas()
         feature_df = cross_df.drop(['username', 'content_id', 'profile_id'])
 
-        features_np = feature_df.to_numpy().astype("float32")
+        for col in feature_df.columns:
+            feature_df = feature_df.with_columns(
+                pl.col(col).cast(pl.Float32, strict=False)
+            )
+
+        feature_df = feature_df.drop_nulls()
+
+        features_np = feature_df.to_numpy()
         infer_tensor = torch.tensor(features_np, dtype=torch.float32)
         infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=infer_batch_size, shuffle=False)
 
