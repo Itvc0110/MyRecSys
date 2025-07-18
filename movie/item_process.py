@@ -55,7 +55,7 @@ def merge_content_movies(movie_data_path, output_file):
         except:
             pass
     df = pd.DataFrame(all_data)
-    df.to_csv(output_file, index=False)
+    df.to_parquet(output_file, index=False)
     return df
 
 def fit_item_encoder(data, single_cols, mlb_col):
@@ -87,7 +87,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     full_output_dir = project_root / output_dir
     full_output_dir.mkdir(parents=True, exist_ok=True)
 
-    merged_file = full_output_dir / "merged_content_movies.csv"
+    merged_file = full_output_dir / "merged_content_movies.parquet"
     if not merged_file.exists():
         movie_df = merge_content_movies(movie_data_path, str(merged_file))
     else:
@@ -105,7 +105,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
             'VOD_CODE': str,
             'content_cate_id': str,
         }
-        movie_df = pd.read_csv(merged_file, dtype=dtype_spec)
+        movie_df = pd.read_parquet(merged_file, dtype=dtype_spec)
 
     # Clean durations
     movie_df['content_duration'] = pd.to_numeric(movie_df['content_duration'], errors='coerce')
@@ -137,6 +137,6 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     if 'tag_names' in movie_df.columns:
         movie_df = movie_df.drop('tag_names', axis=1)
     # Save final output
-    movie_df.to_csv(full_output_dir / "movie_item_data.csv", index=False)
+    movie_df.to_parquet(full_output_dir / "movie_item_data.parquet", index=False)
 
     return movie_df

@@ -150,10 +150,8 @@ class LinearCrossNetwork(nn.Module):
 
             # Concatenate and pad if necessary
             H = torch.cat([H, H * mask], dim=-1)
-
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
-
                 pad = H.new_zeros(H.size(0), pad_size)
                 H = torch.cat([H, pad], dim=-1)
 
@@ -173,8 +171,8 @@ class DCNv3(nn.Module):
                  gpu=-1,
                  learning_rate=1e-3,
                  embedding_dim=10,
-                 num_deep_cross_layers=5,
-                 num_shallow_cross_layers=4,
+                 num_deep_cross_layers=3,
+                 num_shallow_cross_layers=3,
                  deep_net_dropout=0.1,
                  shallow_net_dropout=0.1,
                  layer_norm=True,

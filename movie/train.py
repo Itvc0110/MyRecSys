@@ -165,10 +165,10 @@ def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
 
 if __name__ == "__main__":
     project_root = Path().resolve()
-    data_path = "movie/train_data/merged_user_item_duration.csv"
+    data_path = "movie/train_data/merged_user_item_duration.parquet"
     data_path = os.path.join(project_root, data_path)
     if os.path.exists(data_path):
-        data = pd.read_csv(data_path, low_memory=False)
+        data = pd.read_parquet(data_path)
     else:
         data = process_data(data_path)
 
@@ -180,9 +180,9 @@ if __name__ == "__main__":
     X = train_data.drop(columns=["label"])
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
-    
+
     raw_root = (len(y) - y.sum()) / y.sum()
-    pos_weight = math.sqrt(raw_root)
+    pos_weight = 0.5*raw_root + math.sqrt(raw_root)
 
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
@@ -209,14 +209,14 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
+    optimizer = optim.Adam(model.parameters(), lr=1e-2)
+    loss_fn = TriBCE_Loss()
 
     start_time = time.time()
     for i in range(5):
-        print(f"\nTraining Run no.{i+1}\n")
+        print(f"Traing run number: {i+1}")
         epochs = 20
-        patience = 5
+        patience = 3
 
         train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=epochs, patience=patience)
     
