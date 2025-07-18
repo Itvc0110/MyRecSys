@@ -91,7 +91,7 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     user_profile_list = []
     for duration in durations:
         try:
-            df = pd.read_parquet(duration, usecols=["username", "profile_id"])
+            df = pd.read_parquet(duration, columns==["username", "profile_id"])
             user_profile_list.append(df.drop_duplicates())
         except Exception as e:
             print(f"Error processing {duration}: {str(e)}")
