@@ -1,5 +1,5 @@
 import os
-import pandas as pd
+import polars as pl
 import torch
 from tqdm import tqdm
 import json
@@ -71,17 +71,17 @@ if __name__ == "__main__":
     rulename_json_path = project_root / "clip/result/rulename.json"
     rule_content_path = project_root / "clip/result/rule_content.txt"
 
-    user_df = process_user_data(user_data_path, "clip/infer_data", -1, mode='infer')
-    clip_df = process_clip_item(clip_data_path, "clip/infer_data", -1, mode='infer')
-    clip_df['content_id'] = clip_df['content_id'].astype(str)
+    user_df = pl.from_pandas(process_user_data(user_data_path, "clip/infer_data", -1, mode='infer'))
+    clip_df = pl.from_pandas(process_clip_item(clip_data_path, "clip/infer_data", -1, mode='infer'))
+    clip_df = clip_df.with_columns(pl.col("content_id").cast(pl.Utf8))
 
     duration_files = glob(str(project_root / "clip/merged_duration/*.parquet"))
     user_profile_list = [
-        pd.read_parquet(path)[['username', 'profile_id']].drop_duplicates()
+        pl.read_parquet(path).select(["username", "profile_id"]).unique()
         for path in duration_files
     ]
-    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
-    user_profile_df = user_profile_df.merge(user_df, on='username', how='inner')
+    user_profile_df = pl.concat(user_profile_list).unique()
+    uuser_profile_df = user_profile_df.join(user_df, on="username", how="inner")
 
     checkpoint_path = "model/clip/best_model.pth"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     result_dict = {}
     total_pairs = 0
 
-    user_batch_size = 10
+    user_batch_size = 1
     infer_batch_size= 64
     print(f"User batch size: {user_batch_size}")
     print(f"Inference batch size: {infer_batch_size}")
@@ -105,24 +105,23 @@ if __name__ == "__main__":
     for i in range(0, len(user_profile_df), user_batch_size):
         batch_index = i // user_batch_size + 1
 
-        print(f"\n📦 Processing batch {batch_index}/{estimated_batches} (Users {i} to {i + user_batch_size})")
+        print(f"\nProcessing batch {batch_index}/{estimated_batches} (Users {i} to {i + user_batch_size})")
 
         merge_start = time.time()
 
-        user_batch = user_profile_df.iloc[i:i+user_batch_size].copy()
-        user_batch = user_profile_df.iloc[i:i+user_batch_size].copy()
-        user_batch['key'] = 1
-        clip_df['key'] = 1
-        cross_df = user_batch.merge(clip_df, on='key').drop('key', axis=1)
+        user_batch = pl.from_pandas(user_profile_df.iloc[i:i+user_batch_size].copy())
+        user_batch = user_batch.with_columns(pl.lit(1).alias("key"))
+        clip_df = clip_df.with_columns(pl.lit(1).alias("key"))
+        cross_df = user_batch.join(clip_df, on="key").drop("key")
 
         print(f"Cross-merged size: {len(cross_df)} rows (≈ {len(user_batch)} users × {len(clip_df)} clips)")
         print(f"Merge time: {time.time() - merge_start:.2f} sec")
 
-        interaction_df = cross_df[['username', 'content_id', 'profile_id']]
-        exclude = {'username', 'content_id', 'profile_id'}
-        features = cross_df.drop(columns=exclude)
+        interaction_df = cross_df.select(['username', 'content_id', 'profile_id']).to_pandas()
+        feature_df = cross_df.drop(['username', 'content_id', 'profile_id'])
 
-        infer_tensor = torch.tensor(features.to_numpy(), dtype=torch.float32)
+        features_np = feature_df.to_numpy().astype("float32")
+        infer_tensor = torch.tensor(features_np, dtype=torch.float32)
         infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=infer_batch_size, shuffle=False)
 
         infer_start = time.time()
@@ -141,8 +140,8 @@ if __name__ == "__main__":
                 'content_name': '', 'tag_names': '', 'type_id': '', 'score': float(score)
             }
 
-    content_clip_df = pd.read_parquet(content_clip_path)
-    content_unique = content_clip_df.drop_duplicates(subset='content_id').set_index('content_id')
+    content_clip_df = pl.read_parquet(content_clip_path)
+    content_unique = content_clip_df.unique(subset='content_id').to_pandas().set_index("content_id")
 
     for pid in result_dict:
         for cid in result_dict[pid]['suggested_content']:
