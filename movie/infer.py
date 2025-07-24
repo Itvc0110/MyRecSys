@@ -95,7 +95,7 @@ if __name__ == "__main__":
         features = df.drop(columns=['username', 'content_id', 'profile_id'])
 
         infer_tensor = torch.tensor(features.to_numpy(), dtype=torch.float32)
-        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=64, shuffle=False)
+        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=256, shuffle=False)
 
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
