@@ -182,7 +182,7 @@ if __name__ == "__main__":
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
     raw_root = (len(y) - y.sum()) / y.sum()
-    pos_weight = 0.5*raw_root + math.sqrt(raw_root)
+    pos_weight = 0.5*raw_root + 0.5*math.sqrt(raw_root)
 
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
@@ -210,7 +210,7 @@ if __name__ == "__main__":
     model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-2)
-    loss_fn = TriBCE_Loss()
+    loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
 
     start_time = time.time()
     for i in range(5):
