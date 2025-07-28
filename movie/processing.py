@@ -12,6 +12,26 @@ import pandas as pd
 import polars as pl
 
 
+def write_cross_chunk(args):
+    i, user_chunk_pd, movie_df_pd, chunk_size, infer_subdir = args
+
+    user_chunk = pl.from_pandas(user_chunk_pd)
+    movie_pl = pl.from_pandas(movie_df_pd)
+
+    cross_chunk = user_chunk.join(movie_pl, how="cross")
+    file_index = 0
+    for j in range(0, len(cross_chunk), chunk_size):
+        sub_chunk = cross_chunk.slice(j, chunk_size)
+        part_file = os.path.join(infer_subdir, f"infer_user_movie_part_{i}_{file_index}.parquet")
+        start_time = time()
+        sub_chunk.write_parquet(part_file)
+        elapsed = time() - start_time
+        if file_index % 10 == 0 or file_index == 0:
+            print(f"  ↪︎ Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f}s")
+        file_index += 1
+    return file_index
+
+
 def process_data(output_filepath):
     project_root = Path().resolve()
 
@@ -162,7 +182,16 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
         )
 
     print(f"🚀 Starting parallel processing with {cpu_count()} workers...")
-    with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
-        list(executor.map(wrapper, user_chunks))
+    max_workers=cpu_count()
+    
+    args_list = [
+        (i, user_profile_df.iloc[i:i+user_batch_size], movie_df, chunk_size, infer_subdir)
+        for i in range(0, len(user_profile_df), user_batch_size)
+    ]
+
+    print(f"🚀 Starting parallel processing with {max_workers} workers...")
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(write_cross_chunk, args_list))
 
     print("✅ All user batches merged and saved.")
