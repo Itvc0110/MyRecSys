@@ -77,7 +77,7 @@ def process_data(output_filepath):
 
 
 def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, output_dir_path,
-                    user_batch_size=10, chunk_size=200000, max_files=-1):
+                    user_batch_size=10, chunk_size=None, max_files=-1):
     project_root = Path().resolve()
     output_dir = os.path.join(project_root, output_dir_path)
     os.makedirs(output_dir, exist_ok=True)
@@ -88,6 +88,10 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
     user_df = process_user_data(user_data_path, output_dir_path, num_user, mode='infer').head(num_user)
     movie_df = process_movie_item(movie_data_path, output_dir_path, num_movie, mode='infer').head(num_movie)
     movie_df['content_id'] = movie_df['content_id'].astype(str)
+
+    # Load chunk size by movie_df len
+    if chunk_size is None:
+        chunk_size = user_batch_size * len(movie_df)
 
     # Read profile IDs (avoid memory explosion)
     merged_duration_folder_path = os.path.join(project_root, "movie/merged_duration")
@@ -139,7 +143,7 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
             part_file = os.path.join(infer_subdir, f"infer_user_movie_part_{file_index}.parquet")
             sub_chunk.write_parquet(part_file)  
             elapsed = time() - start_time
-            if file_index % 50 == 0:
+            if file_index % 10 == 0:
                 print(f"Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f} sec")
             file_index += 1
 

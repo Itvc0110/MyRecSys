@@ -70,7 +70,7 @@ if __name__ == "__main__":
     part_files = sorted(glob(str(project_root / "movie/infer_data/infer_user_movie/infer_user_movie_part_*.parquet")))
     if not part_files:
         process_infer_data(user_data_path, movie_data_path, num_user=-1, num_movie=-1, output_dir_path="movie/infer_data",
-                           user_batch_size=10, chunk_size=5000000, max_files=500)
+                        user_batch_size=50, chunk_size=None, max_files=500)
         part_files = sorted(glob(str(project_root / "movie/infer_data/infer_user_movie/infer_user_movie_part_*.parquet")))
 
     checkpoint_path = "model/movie/best_model.pth"
@@ -101,9 +101,9 @@ if __name__ == "__main__":
         total_pairs += len(predictions)
 
         for pid, user, cid, score in zip(interaction_df['profile_id'],
-                                         interaction_df['username'],
-                                         interaction_df['content_id'],
-                                         predictions):
+                                        interaction_df['username'],
+                                        interaction_df['content_id'],
+                                        predictions):
             result_dict.setdefault(pid, {})
             result_dict[pid].setdefault('suggested_content', {})
             result_dict[pid]['suggested_content'][cid] = {
