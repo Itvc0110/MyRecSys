@@ -181,9 +181,8 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
             max_files=max_files
         )
 
-    print(f"🚀 Starting parallel processing with {cpu_count()} workers...")
     max_workers=cpu_count()
-    
+
     args_list = [
         (i, user_profile_df.iloc[i:i+user_batch_size], movie_df, chunk_size, infer_subdir)
         for i in range(0, len(user_profile_df), user_batch_size)
