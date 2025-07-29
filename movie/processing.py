@@ -19,17 +19,13 @@ def write_cross_chunk(args):
     movie_pl = pl.from_pandas(movie_df_pd)
 
     cross_chunk = user_chunk.join(movie_pl, how="cross")
-    file_index = 0
-    for j in range(0, len(cross_chunk), chunk_size):
-        sub_chunk = cross_chunk.slice(j, chunk_size)
-        part_file = os.path.join(infer_subdir, f"infer_user_movie_part_{i}_{file_index}.parquet")
-        start_time = time()
-        sub_chunk.write_parquet(part_file)
-        elapsed = time() - start_time
-        if file_index % 10 == 0 or file_index == 0:
-            print(f"  ↪︎ Saved: {part_file} ({len(sub_chunk)} rows) | Time taken: {elapsed:.2f}s")
-        file_index += 1
-    return file_index
+    part_file = os.path.join(infer_subdir, f"infer_user_movie_part_{i}.parquet")
+    start_time = time()
+    cross_chunk.write_parquet(part_file)
+    elapsed = time() - start_time
+    print(f"  ↪︎ Saved: {part_file} ({len(cross_chunk)} rows) | Time taken: {elapsed:.2f}s")
+
+    return len(cross_chunk)
 
 
 def process_data(output_filepath):
@@ -97,35 +93,11 @@ def process_data(output_filepath):
     else:
         return
 
-def _cross_merge_and_save(user_chunk_pd, movie_df, chunk_size, infer_subdir, start_file_index, max_files=None):
-    try:
-        print(f"[Batch {start_file_index}] Starting cross join...")
-        movie_pl = pl.from_pandas(movie_df)
-        user_chunk = pl.from_pandas(user_chunk_pd)
-        cross_chunk = user_chunk.join(movie_pl, how="cross")
-        print(f"[Batch {start_file_index}] Cross join result: {len(cross_chunk)} rows")
 
-        paths = []
-        file_index = start_file_index
-        for j in range(0, len(cross_chunk), chunk_size):
-            if max_files and file_index >= max_files:
-                print(f"[Batch {start_file_index}] Reached max_files limit")
-                break
-            sub_chunk = cross_chunk.slice(j, chunk_size)
-            part_file = os.path.join(infer_subdir, f"infer_user_movie_part_{file_index}.parquet")
-            start = time()
-            sub_chunk.write_parquet(part_file)
-            duration = time() - start
-            print(f"[Batch {start_file_index}] Saved: {part_file} ({len(sub_chunk)} rows) in {duration:.2f}s")
-            paths.append(part_file)
-            file_index += 1
-        return paths
-    except Exception as e:
-        print(f"[Batch {start_file_index}] ERROR: {str(e)}")
-        return []
     
 def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, output_dir_path,
-                       user_batch_size=10, chunk_size=None, max_files=-1):
+                       user_batch_size=20, chunk_size=None, max_files=-1):
+    start_time = time()
     project_root = Path().resolve()
     output_dir = os.path.join(project_root, output_dir_path)
     os.makedirs(output_dir, exist_ok=True)
@@ -140,7 +112,7 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
 
     if chunk_size is None:
         chunk_size = user_batch_size * len(movie_df)
-        print(f"chunk_size set to {chunk_size} (user_batch_size × num_movies)")
+    print(f"chunk_size set to {chunk_size} (user_batch_size × num_movies)")
 
     merged_duration_folder_path = os.path.join(project_root, "movie/merged_duration")
     durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
@@ -152,45 +124,44 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
         except Exception as e:
             print(f"Error reading {duration}: {e}")
     if not user_profile_list:
-        print("❌ No duration data available.")
+        print("No duration data available.")
         return
 
     user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
 
-    print(f"Loaded {len(user_profile_df)} unique user-profile entries.")
+    total_users = len(user_profile_df)
+    total_movies = len(movie_df)
+    total_expected_rows = total_users * total_movies
+
+    print(f"Loaded {total_users} unique user-profile entries.")
+    print(f"Total movies: {total_movies}")
+    print(f"Estimated total inference rows: {total_expected_rows:,}")
+
     user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
     user_profile_df.to_parquet(user_profile_path, index=False)
 
     user_chunks = []
     for i in range(0, len(user_profile_df), user_batch_size):
         chunk = user_profile_df.iloc[i:i + user_batch_size]
-        user_chunks.append((chunk, i))  # pair chunk with its batch index
+        user_chunks.append((i, chunk, movie_df, chunk_size, infer_subdir))
 
-    print(f"🔁 {len(user_chunks)} user chunks will be processed in parallel.")
-    print(f"→ Estimated output files: ~{ceil(len(user_chunks) * len(movie_df) / chunk_size)}")
+    estimated_files = len(user_chunks)
+    print(f"{len(user_chunks)} user chunks will be processed in parallel.")
+    print(f"→ Estimated number of output files: {estimated_files}")
 
-    def wrapper(args):
-        chunk_df, batch_idx = args
-        return _cross_merge_and_save(
-            user_chunk_pd=chunk_df,
-            movie_df=movie_df,
-            chunk_size=chunk_size,
-            infer_subdir=infer_subdir,
-            start_file_index=batch_idx,
-            max_files=max_files
-        )
-
-    max_workers=cpu_count()
-
-    args_list = [
-        (i, user_profile_df.iloc[i:i+user_batch_size], movie_df, chunk_size, infer_subdir)
-        for i in range(0, len(user_profile_df), user_batch_size)
-    ]
-
-    print(f"🚀 Starting parallel processing with {max_workers} workers...")
+    max_workers = cpu_count()
+    print(f"Starting parallel processing with {max_workers} workers...")
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        list(executor.map(write_cross_chunk, args_list))
+        row_counts = list(executor.map(write_cross_chunk, user_chunks))
 
-    print("✅ All user batches merged and saved.")
+    elapsed = time() - start_time
+    total_rows_written = sum(row_counts)
+
+    print("\nAll user batches merged and saved.")
+    print(f"Actual number of files saved: {len(row_counts)}")
+    print(f"Actual total rows written: {total_rows_written:,}")
+    print(f"Time taken to save all files: {elapsed:.2f} seconds")
+    print(f"Estimated inference batches: {len(row_counts)}")
+    print(f"max_files={max_files} (currently unused in this mode)")
