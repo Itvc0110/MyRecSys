@@ -1,5 +1,12 @@
+from concurrent.futures import ProcessPoolExecutor
 import pandas as pd
 import glob
+
+def _assign_rule_user(args):
+    user_id, suggested_content, rule_dict, tag_mapping = args
+    for content_id, content in suggested_content.items():
+        content['rule_id'] = process_rule(rule_dict, tag_mapping, content['tag_names'])
+    return user_id, suggested_content
 
 def get_tag_mapping(tags_path):
     content_to_tag_file = glob.glob(f"{tags_path}/*/*.json")
@@ -35,13 +42,17 @@ def process_rule(rule_dict, tag_mapping, tag_names):
             return rule_id
     return -100
 
-def get_rulename(reordered_data, rule_info_path, tags_path):
+def get_rulename_parallel(reordered_data, rule_info_path, tags_path, max_workers=None):
     rule_info = pd.read_parquet(rule_info_path)
     rule_dict = preprocess_rule_info(rule_info)
     tag_mapping = get_tag_mapping(tags_path)
 
-    for user_id in reordered_data:
-        for content_id in reordered_data[user_id]['suggested_content']:
-            tag_names = reordered_data[user_id]['suggested_content'][content_id]['tag_names']
-            reordered_data[user_id]['suggested_content'][content_id]['rule_id'] = process_rule(rule_dict, tag_mapping, tag_names)
-    return reordered_data
+    args_list = [
+        (uid, data['suggested_content'], rule_dict, tag_mapping)
+        for uid, data in reordered_data.items()
+    ]
+
+    with ProcessPoolExecutor(max_workers=max_workers or os.cpu_count()) as executor:
+        results = executor.map(_assign_rule_user, args_list)
+
+    return {uid: {'suggested_content': sc, 'user': reordered_data[uid]['user']} for uid, sc in results}

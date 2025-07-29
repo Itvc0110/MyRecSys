@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import polars as pl
 import torch
 from tqdm import tqdm
 import json
@@ -7,36 +8,28 @@ import time
 from pathlib import Path
 from glob import glob
 
+from concurrent.futures import ProcessPoolExecutor
 from processing import process_infer_data
 from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
-from rule_process import get_rulename
+from rule_process import get_rulename_parallel
 
-def rank_result(data, n):
-    reordered_data = {}
-    for idx, user_id in enumerate(data, 1):
-        user_scores = []
-        for content_id, content in data[user_id]['suggested_content'].items():
-            user_scores.append({
-                'content_id': content_id,
-                'content_name': content['content_name'],
-                'tag_names': content['tag_names'],
-                'type_id': content['type_id'],
-                'score': content['score']
-            })
-        sorted_user_scores = sorted(user_scores, key=lambda x: x['score'], reverse=True)[:n]
-        reordered_data[user_id] = {
-            'suggested_content': {
-                film['content_id']: {
-                    'content_name': film['content_name'],
-                    'tag_names': film['tag_names'],
-                    'type_id': film['type_id'],
-                    'score': film['score']
-                } for film in sorted_user_scores
-            },
-            'user': data[user_id]['user']
-        }
-    return reordered_data
+def _rank_user(args):
+    user_id, suggested_content, top_n = args
+    user_scores = [
+        (cid, content['score'], content)
+        for cid, content in suggested_content.items()
+    ]
+    top_items = sorted(user_scores, key=lambda x: x[1], reverse=True)[:top_n]
+    return user_id, {
+        'suggested_content': {cid: content for cid, _, content in top_items}
+    }
+
+def rank_result_parallel(data, n, max_workers=None):
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        args = [(uid, user_data['suggested_content'], n) for uid, user_data in data.items()]
+        results = list(executor.map(_rank_user, args))
+    return {uid: {'suggested_content': sc, 'user': data[uid]['user']} for uid, sc in results}
 
 def infer(model, data, device):
     model.eval()
@@ -87,7 +80,7 @@ if __name__ == "__main__":
         file_start = time.time()
         print(f"[Inference {idx}/{len(part_files)}] Loading {os.path.basename(part_file)}...")
 
-        df = pd.read_parquet(part_file).fillna(0)
+        df = pl.read_parquet(part_file).fill_null(0).to_pandas()
         exclude = {'username', 'content_id', 'profile_id'}
         to_convert = [col for col in df.columns if col not in exclude]
         df[to_convert] = df[to_convert].apply(pd.to_numeric, errors='coerce')
@@ -128,21 +121,33 @@ if __name__ == "__main__":
     print("\nStarting ranking and rule assignment...")
     rank_start = time.time()
 
-    content_movie_df = pd.read_parquet(content_movie_path)
-    content_unique = content_movie_df.drop_duplicates(subset='content_id').set_index('content_id')
+    content_movie_pl = pl.read_parquet(content_movie_path)
+    content_unique = (
+        content_movie_pl
+        .unique(subset=['content_id'])
+        .select(['content_id', 'content_name', 'tag_names', 'type_id'])
+    )
 
-    for pid in result_dict:
-        for cid in result_dict[pid]['suggested_content']:
-            try:
-                row = content_unique.loc[cid]
-                result_dict[pid]['suggested_content'][cid]['content_name'] = row['content_name']
-                result_dict[pid]['suggested_content'][cid]['tag_names'] = str(row['tag_names'])
-                result_dict[pid]['suggested_content'][cid]['type_id'] = str(row['type_id'])
-            except KeyError:
-                continue
+    content_dict = {
+        row[0]: (row[1], row[2], row[3]) 
+        for row in content_unique.iter_rows()
+    }
 
-    reordered_result = rank_result(result_dict, TOP_N)
-    result_with_rule = get_rulename(reordered_result, rule_info_path, tags_path)
+    for pid, pdata in result_dict.items():
+        for cid, cdata in pdata['suggested_content'].items():
+            meta = content_dict.get(cid)
+            if meta:
+                cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
+
+    print("\nStarting parallel ranking...")
+    rank_start = time.time()
+    reordered_result = rank_result_parallel(result_dict, TOP_N, max_workers=os.cpu_count())
+    print(f"Ranking completed in {time.time()-rank_start:.2f}s")
+
+    print("\nStarting parallel rule assignment...")
+    rule_start = time.time()
+    result_with_rule = get_rulename_parallel(reordered_result, rule_info_path, tags_path)
+    print(f"Rule assignment completed in {time.time()-rule_start:.2f}s")
 
     print(f"Ranking & rule assignment completed in {time.time()-rank_start:.2f}s")
 
