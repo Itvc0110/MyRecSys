@@ -1,184 +1,170 @@
 import os
+import pandas as pd
 import polars as pl
 import torch
 from tqdm import tqdm
 import json
 import time
 from pathlib import Path
-from glob import glob
-import pandas as pd
 
-from item_process import process_clip_item, transform_item_data
-from user_process import process_user_data, transform_user_data
+from concurrent.futures import ProcessPoolExecutor
+from user_process import process_user_data
+from item_process import process_movie_item
 from dcnv3 import DCNv3
-from rule_process import get_rulename
-from torch.utils.data import DataLoader, TensorDataset
+from rule_process import get_rulename_parallel
 
-def rank_result(data, n):
-    reordered_data = {}
-    for user_id in data:
-        user_scores = [
-            {
-                'content_id': cid,
-                'content_name': info['content_name'],
-                'tag_names': info['tag_names'],
-                'type_id': info['type_id'],
-                'score': info['score']
-            }
-            for cid, info in data[user_id]['suggested_content'].items()
-        ]
-        sorted_user_scores = sorted(user_scores, key=lambda x: x['score'], reverse=True)[:n]
-        reordered_data[user_id] = {
-            'suggested_content': {
-                film['content_id']: {
-                    'content_name': film['content_name'],
-                    'tag_names': film['tag_names'],
-                    'type_id': film['type_id'],
-                    'score': film['score']
-                } for film in sorted_user_scores
-            },
-            'user': data[user_id]['user']
-        }
-    return reordered_data
+# -------------------------
+# Utility: Parallel ranking
+# -------------------------
+def _rank_user(args):
+    user_id, suggested_content, top_n = args
+    user_scores = sorted(
+        suggested_content.items(),
+        key=lambda kv: kv[1]['score'],
+        reverse=True
+    )[:top_n]
+    return user_id, dict(user_scores)
 
-def infer(model, data, device):
+def rank_result_parallel(data, n, max_workers=None, chunk_size=5000):
+    items = list(data.items())
+    chunks = [items[i:i+chunk_size] for i in range(0, len(items), chunk_size)]
+    
+    def _process_chunk(chunk):
+        out = {}
+        for uid, user_data in chunk:
+            scores = sorted(
+                user_data['suggested_content'].items(),
+                key=lambda kv: kv[1]['score'],
+                reverse=True
+            )[:n]
+            out[uid] = {'suggested_content': dict(scores), 'user': user_data['user']}
+        return out
+
+    with ProcessPoolExecutor(max_workers=max_workers or os.cpu_count()) as ex:
+        results = list(ex.map(_process_chunk, chunks))
+    
+    merged = {}
+    for r in results:
+        merged.update(r)
+    return merged
+
+# -------------------------
+# Torch inference function
+# -------------------------
+def infer(model, features, batch_size, device):
     model.eval()
     predictions = []
+    tensor = torch.tensor(features, dtype=torch.float32)
+    loader = torch.utils.data.DataLoader(tensor, batch_size=batch_size, shuffle=False)
     with torch.no_grad():
-        for batch in tqdm(data, desc="Inference"):
-            inputs = batch[0].to(device)
+        for batch in loader:
+            inputs = batch.to(device)
             outputs = model(inputs)
             predictions.extend(outputs['y_pred'].detach().cpu().numpy())
             torch.cuda.empty_cache()
     return predictions
 
+# -------------------------
+# Streaming inference pipeline
+# -------------------------
 if __name__ == "__main__":
-
     start_time = time.time()
-
     TOP_N = 200
+    USER_BATCH_SIZE = 50  # tune for memory
 
     project_root = Path().resolve()
     os.makedirs(project_root / "clip" / "result", exist_ok=True)
-    os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
-    user_data_path = project_root / "month_mytv_info.parquet"
-    clip_data_path = project_root / "mytv_vmp_content"
-    content_clip_path = project_root / "clip/infer_data/merged_content_clips.parquet"
-    tags_path = project_root / "tags"
-    rule_info_path = project_root / "rule_info.parquet"
+    # Input paths
+    user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
+    clip_data_path = os.path.join(project_root, "mytv_vmp_content")
+    content_clip_path = os.path.join(project_root, "clip/infer_data/merged_content_clips.parquet")
+    tags_path = os.path.join(project_root, "tags")
+    rule_info_path = os.path.join(project_root, "rule_info.parquet")
 
-    result_json_path = project_root / "clip/result/result.json"
-    rulename_json_path = project_root / "clip/result/rulename.json"
-    rule_content_path = project_root / "clip/result/rule_content.txt"
+    # Output paths
+    result_json_path = os.path.join(project_root, "clip/result/result.json")
+    rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
+    rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
-    user_df_raw = process_user_data(user_data_path, "clip/infer_data", -1, mode='infer')
-    clip_df_raw = process_clip_item(clip_data_path, "clip/infer_data", -1, mode='infer')
+    # Load data
+    print("Loading user & clip data...")
+    user_df = process_user_data(user_data_path, "clip/infer_data", num_user=-1, mode='infer')
+    clip_df = process_movie_item(clip_data_path, "clip/infer_data", num_movie=-1, mode='infer')
+    clip_df['content_id'] = clip_df['content_id'].astype(str)
+    total_users = len(user_df)
+    total_clips = len(clip_df)
+    print(f"Loaded {total_users} users × {total_clips} clips = {total_users * total_clips:,} pairs (streamed)")
 
-    # Apply saved encoders (same as used in training)
-    user_df_encoded = transform_user_data(user_df_raw, ["province", "package_code"])
-    clip_df_encoded = transform_item_data(clip_df_raw,
-        ["content_country", "locked_level", "VOD_CODE", "contract", "type_id"],
-        "content_cate_id"
-    )
-
-    user_df = pl.from_pandas(user_df_encoded)
-    clip_df = pl.from_pandas(clip_df_encoded)
-
-    clip_df = clip_df.with_columns(pl.col("content_id").cast(pl.Utf8))
-
-    duration_files = glob(str(project_root / "clip/merged_duration/*.parquet"))
-    user_profile_list = [
-        pl.read_parquet(path).select(["username", "profile_id"]).unique()
-        for path in duration_files
-    ]
-    user_profile_df = pl.concat(user_profile_list).unique()
-    uuser_profile_df = user_profile_df.join(user_df, on="username", how="inner")
-
+    # Load model
     checkpoint_path = "model/clip/best_model.pth"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    expected_input_dim = checkpoint['model_state_dict']['ECN.dfc.weight'].shape[1]
+    expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
     model = DCNv3(expected_input_dim).to(device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    # Prepare clip data in Polars
+    clip_pl = pl.from_pandas(clip_df)
 
     result_dict = {}
     total_pairs = 0
 
-    user_batch_size = 1
-    infer_batch_size= 64
-    print(f"User batch size: {user_batch_size}")
-    print(f"Inference batch size: {infer_batch_size}")
+    # Stream user batches
+    for start in range(0, len(user_df), USER_BATCH_SIZE):
+        user_chunk_pd = user_df.iloc[start:start + USER_BATCH_SIZE]
+        user_chunk_pl = pl.from_pandas(user_chunk_pd)
 
-    estimated_batches = (len(user_profile_df) + user_batch_size - 1) // user_batch_size
-    print(f"Estimated number of user batches: {estimated_batches}")
+        # Cross join in memory
+        cross_chunk = user_chunk_pl.join(clip_pl, how="cross")
 
+        # Convert to tensors
+        exclude = {'username', 'content_id', 'profile_id'}
+        interaction_df = cross_chunk.select(['username', 'content_id', 'profile_id']).to_pandas()
+        features = cross_chunk.drop(list(exclude)).to_numpy(dtype='float32')
 
-    for i in range(0, len(user_profile_df), user_batch_size):
-        batch_index = i // user_batch_size + 1
+        # Inference
+        preds = infer(model, features, batch_size=2048, device=device)
+        total_pairs += len(preds)
+        print(f"Processed batch {start//USER_BATCH_SIZE+1} "
+              f"| {len(preds):,} pairs | Total: {total_pairs:,}")
 
-        print(f"\nProcessing batch {batch_index}/{estimated_batches} (Users {i} to {i + user_batch_size})")
-
-        merge_start = time.time()
-
-        user_batch = user_profile_df.slice(i, user_batch_size)
-        user_batch = user_batch.with_columns(pl.lit(1).alias("key"))
-        clip_df_batch = clip_df.with_columns(pl.lit(1).alias("key"))
-        cross_df = user_batch.join(clip_df_batch, on="key").drop("key")
-
-        print(f"Cross-merged size: {len(cross_df)} rows (≈ {len(user_batch)} users × {len(clip_df)} clips)")
-        print(f"Merge time: {time.time() - merge_start:.2f} sec")
-
-        interaction_df = cross_df.select(['username', 'content_id', 'profile_id']).to_pandas()
-        feature_df = cross_df.drop(['username', 'content_id', 'profile_id'])
-
-        for col in feature_df.columns:
-            feature_df = feature_df.with_columns(
-                pl.col(col).cast(pl.Float32, strict=False)
-            )
-
-        feature_df = feature_df.drop_nulls()
-
-        features_np = feature_df.to_numpy()
-        ##########################################
-        assert features_np.shape[1] == expected_input_dim, \
-        f"Expected input dim: {expected_input_dim}, but got: {features_np.shape[1]}"
-        #########################################
-        infer_tensor = torch.tensor(features_np, dtype=torch.float32)
-        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=infer_batch_size, shuffle=False)
-
-        infer_start = time.time()
-        predictions = infer(model, infer_loader, device)
-        infer_time = time.time() - infer_start
-        print(f"Inference took {infer_time:.2f}s | Rows: {len(predictions)}")
-
-        total_pairs += len(predictions)
-
-        for pid, user, cid, score in zip(interaction_df['profile_id'],
-                                         interaction_df['username'],
-                                         interaction_df['content_id'],
-                                         predictions):
+        # Update result_dict
+        for pid, user, cid, score in zip(
+            interaction_df['profile_id'],
+            interaction_df['username'],
+            interaction_df['content_id'],
+            preds
+        ):
             result_dict.setdefault(pid, {'suggested_content': {}, 'user': {'username': user, 'profile_id': pid}})
             result_dict[pid]['suggested_content'][cid] = {
                 'content_name': '', 'tag_names': '', 'type_id': '', 'score': float(score)
             }
 
-    content_clip_df = pl.read_parquet(content_clip_path)
-    content_unique = content_clip_df.unique(subset='content_id').to_pandas().set_index("content_id")
+    # Attach metadata
+    content_clip_pl = pl.read_parquet(content_clip_path)
+    content_unique = (
+        content_clip_pl
+        .unique(subset=['content_id'])
+        .select(['content_id', 'content_name', 'tag_names', 'type_id'])
+    )
+    content_dict = {
+        row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()
+    }
+    for pid, pdata in result_dict.items():
+        for cid, cdata in pdata['suggested_content'].items():
+            meta = content_dict.get(cid)
+            if meta:
+                cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
 
-    for pid in result_dict:
-        for cid in result_dict[pid]['suggested_content']:
-            try:
-                row = content_unique.loc[cid]
-                result_dict[pid]['suggested_content'][cid]['content_name'] = row['content_name']
-                result_dict[pid]['suggested_content'][cid]['tag_names'] = str(row['tag_names'])
-                result_dict[pid]['suggested_content'][cid]['type_id'] = str(row['type_id'])
-            except KeyError:
-                continue
+    # Ranking
+    print("\nStarting parallel ranking & rule assignment...")
+    rank_start = time.time()
+    reordered_result = rank_result_parallel(result_dict, TOP_N, max_workers=os.cpu_count())
+    result_with_rule = get_rulename_parallel(reordered_result, rule_info_path, tags_path)
+    print(f"Ranking & rule assignment completed in {time.time()-rank_start:.2f}s")
 
-    reordered_result = rank_result(result_dict, TOP_N)
-    result_with_rule = get_rulename(reordered_result, rule_info_path, tags_path)
-
+    # Save outputs
     homepage_rule = []
     rule_content = ""
     for pid, info in result_with_rule.items():
@@ -200,8 +186,6 @@ if __name__ == "__main__":
     with open(rule_content_path, "w", encoding='utf-8') as f:
         f.write(rule_content)
 
-    total_time = time.time() - start_time
-    print("\nInference completed.")
-    print(f"Total elapsed time: {total_time:.2f} seconds")
-    print(f"Total user-item pairs inferred: {total_pairs}")
-    print(f"Average time per pair: {total_time / total_pairs:.6f} seconds")
+    elapsed_time = time.time() - start_time
+    print(f"Elapsed time: {elapsed_time:.2f}s | Total pairs: {total_pairs:,} "
+          f"| Avg per pair: {elapsed_time/total_pairs:.6f}s")
