@@ -67,35 +67,32 @@ def process_data(output_filepath):
         return
 
 
-def generate_user_chunks(user_data_path, clip_data_path, num_user, num_clip, user_batch_size=50):
+def generate_user_item_stream(user_data_path, item_data_path, num_user=-1, num_item=-1, 
+                              user_batch_size=50, mode='infer'):
     """
-    Instead of saving parquet files, yield each user batch cross-joined with clips.
+    Yield (user_chunk, cross_join_chunk) batches as Polars DataFrames without writing parquet.
     """
     project_root = Path().resolve()
+    print("Loading user & item data...")
+    
+    # Load users
+    user_df = process_user_data(user_data_path, "clip/infer_data", num_user, mode=mode)
+    # Load items (clips or movies)
+    item_df = process_clip_item(item_data_path, "clip/infer_data", num_item, mode=mode)
+    item_df['content_id'] = item_df['content_id'].astype(str)
+    
+    total_users = len(user_df)
+    total_items = len(item_df)
+    print(f"Loaded {total_users} users × {total_items} items = {total_users * total_items:,} pairs (streamed)")
 
-    print("Loading user & clip data...")
-    user_df = process_user_data(user_data_path, "", num_user, mode='infer').head(num_user)
-    clip_df = process_clip_item(clip_data_path, "", num_clip, mode='infer').head(num_clip)
-    clip_df['content_id'] = clip_df['content_id'].astype(str)
+    # Convert items to Polars for efficient cross join
+    item_pl = pl.from_pandas(item_df)
 
-    # Build user profile list
-    merged_duration_folder_path = project_root / "clip/merged_duration"
-    durations = glob.glob(str(merged_duration_folder_path / "*.parquet"))
-    user_profile_list = [
-        pd.read_parquet(d, columns=["username", "profile_id"]).drop_duplicates()
-        for d in durations
-    ]
-    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
-    user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
+    # Stream user batches
+    for start in range(0, len(user_df), user_batch_size):
+        user_chunk_pd = user_df.iloc[start:start + user_batch_size]
+        user_chunk_pl = pl.from_pandas(user_chunk_pd)
 
-    total_users = len(user_profile_df)
-    total_clips = len(clip_df)
-    total_expected_rows = total_users * total_clips
-
-    print(f"Loaded {total_users} unique user-profile entries.")
-    print(f"Total clips: {total_clips}")
-    print(f"Estimated total inference rows: {total_expected_rows:,}")
-
-    for start_idx in range(0, total_users, user_batch_size):
-        batch_users = user_profile_df.iloc[start_idx:start_idx + user_batch_size]
-        yield start_idx, batch_users, clip_df
+        # Cross join: Each user batch with all items
+        cross_chunk = user_chunk_pl.join(item_pl, how="cross")
+        yield user_chunk_pd, cross_chunk

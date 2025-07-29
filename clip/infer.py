@@ -6,8 +6,8 @@ from tqdm import tqdm
 import json
 import time
 from pathlib import Path
-
 from concurrent.futures import ProcessPoolExecutor
+
 from user_process import process_user_data
 from item_process import process_clip_item
 from dcnv3 import DCNv3
@@ -112,6 +112,7 @@ if __name__ == "__main__":
 
     # Stream user batches
     for start in range(0, len(user_df), USER_BATCH_SIZE):
+        batch_start = time.time()
         user_chunk_pd = user_df.iloc[start:start + USER_BATCH_SIZE]
         user_chunk_pl = pl.from_pandas(user_chunk_pd)
 
@@ -126,8 +127,8 @@ if __name__ == "__main__":
         # Inference
         preds = infer(model, features, batch_size=2048, device=device)
         total_pairs += len(preds)
-        print(f"Processed batch {start//USER_BATCH_SIZE+1} "
-              f"| {len(preds):,} pairs | Total: {total_pairs:,}")
+        print(f"[Batch {start//USER_BATCH_SIZE+1}] {len(preds):,} pairs processed "
+              f"| Total: {total_pairs:,} | Time: {time.time()-batch_start:.2f}s")
 
         # Update result_dict
         for pid, user, cid, score in zip(
@@ -148,16 +149,15 @@ if __name__ == "__main__":
         .unique(subset=['content_id'])
         .select(['content_id', 'content_name', 'tag_names', 'type_id'])
     )
-    content_dict = {
-        row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()
-    }
+    content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
+    
     for pid, pdata in result_dict.items():
         for cid, cdata in pdata['suggested_content'].items():
             meta = content_dict.get(cid)
             if meta:
                 cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
 
-    # Ranking
+    # Ranking & rule assignment
     print("\nStarting parallel ranking & rule assignment...")
     rank_start = time.time()
     reordered_result = rank_result_parallel(result_dict, TOP_N, max_workers=os.cpu_count())
@@ -187,5 +187,5 @@ if __name__ == "__main__":
         f.write(rule_content)
 
     elapsed_time = time.time() - start_time
-    print(f"Elapsed time: {elapsed_time:.2f}s | Total pairs: {total_pairs:,} "
+    print(f"\nElapsed time: {elapsed_time:.2f}s | Total pairs: {total_pairs:,} "
           f"| Avg per pair: {elapsed_time/total_pairs:.6f}s")
