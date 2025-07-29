@@ -160,8 +160,8 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
     user_profile_df.to_parquet(user_profile_path, index=False)
 
     # compute total_batches and log_every BEFORE creating the chunks
-    log_every = max(1, len(user_profile_df) // (user_batch_size * 4))
-    total_batches = len(range(0, len(user_profile_df), user_batch_size))  # log about 4 times
+    log_every = max(1, len(user_profile_df) // (user_batch_size * 1))
+    total_batches = len(range(0, len(user_profile_df), user_batch_size))  # log about ... times
 
     user_chunks = []
     for i in range(0, len(user_profile_df), user_batch_size):
