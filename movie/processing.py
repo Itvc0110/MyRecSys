@@ -11,21 +11,25 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 
-
 def write_cross_chunk(args):
     i, user_chunk_pd, movie_df_pd, chunk_size, infer_subdir = args
 
-    start_time = time()
+    batch_start = time()
     user_chunk = pl.from_pandas(user_chunk_pd)
     movie_pl = pl.from_pandas(movie_df_pd)
 
-    # Perform cross join
+    # Cross join
     cross_chunk = user_chunk.join(movie_pl, how="cross")
+
+    # Save to parquet
     part_file = os.path.join(infer_subdir, f"infer_user_movie_part_{i}.parquet")
+    io_start = time()
+    cross_chunk.write_parquet(part_file)
+    io_elapsed = time() - io_start
+    batch_elapsed = time() - batch_start
 
-
-    elapsed = time() - start_time
-    print(f"  ↪︎ Saved: {part_file} ({len(cross_chunk)} rows) | Time taken: {elapsed:.2f}s")
+    print(f"  ↪︎ Saved: {part_file} ({len(cross_chunk)} rows) "
+          f"| Batch {batch_elapsed:.2f}s | I/O {io_elapsed:.2f}s")
 
     return len(cross_chunk)
 
