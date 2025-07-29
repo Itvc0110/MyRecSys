@@ -13,29 +13,34 @@ import polars as pl
 
 
 def write_cross_chunk(args):
-    i, user_chunk_pd, movie_df_pd, chunk_size, infer_subdir, log_every, total_batches = args
+    i, user_chunk_pd, movie_df_pd, chunk_size, infer_subdir, log_every, total_batches, user_batch_size = args
 
+    batch_idx = i // user_batch_size  # calculate sequential batch index
     batch_start = time()
+
+    # Convert to Polars
     user_chunk = pl.from_pandas(user_chunk_pd)
     movie_pl = pl.from_pandas(movie_df_pd)
 
+    # Cross join
     cross_chunk = user_chunk.join(movie_pl, how="cross")
     part_file = os.path.join(infer_subdir, f"infer_user_movie_part_{i}.parquet")
 
+    # Save parquet
     io_start = time()
     cross_chunk.write_parquet(part_file)
     io_elapsed = time() - io_start
     batch_elapsed = time() - batch_start
 
-    # ETA calculation
-    completed_batches = (i // log_every) + 1
-    avg_time = batch_elapsed
+    # ETA
+    completed_batches = batch_idx + 1
     remaining_batches = total_batches - completed_batches
-    eta = remaining_batches * avg_time
+    eta = remaining_batches * batch_elapsed
 
-    if i % log_every == 0 or i == 0:
+    # Logging
+    if batch_idx % log_every == 0 or batch_idx == 0:
         print(
-            f"[Saving {i//log_every+1}/{total_batches}] {part_file}\n"
+            f"[Saving batch {batch_idx+1}/{total_batches}] {part_file}\n"
             f"  ↪︎ {len(cross_chunk):,} rows | Batch {batch_elapsed:.2f}s "
             f"(I/O {io_elapsed:.2f}s) | ETA {eta/60:.2f} min"
         )
@@ -156,14 +161,17 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
     user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
     user_profile_df.to_parquet(user_profile_path, index=False)
 
-    log_every = max(1, len(user_profile_df) // (user_batch_size * 4))  # log ~4 times
-    total_batches = len(user_chunks)
+    # compute total_batches and log_every BEFORE creating the chunks
+    total_batches = ceil(total_users / user_batch_size)
+    log_every = max(1, total_batches // 4)  # log about 4 times
 
     user_chunks = []
-
     for i in range(0, len(user_profile_df), user_batch_size):
         chunk = user_profile_df.iloc[i:i + user_batch_size]
         user_chunks.append((i, chunk, movie_df, chunk_size, infer_subdir, log_every, total_batches))
+
+    print(f"🔁 Total batches: {total_batches}")
+
 
     estimated_files = len(user_chunks)
     print(f"{len(user_chunks)} user chunks will be processed in parallel.")
