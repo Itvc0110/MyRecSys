@@ -156,7 +156,7 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
     user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
     user_profile_df.to_parquet(user_profile_path, index=False)
 
-    log_every = max(1, len(user_profile_df) // (user_batch_size * 10))  # log ~10 times
+    log_every = max(1, len(user_profile_df) // (user_batch_size * 4))  # log ~4 times
     total_batches = len(user_chunks)
 
     user_chunks = []
