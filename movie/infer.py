@@ -14,7 +14,7 @@ from rule_process import get_rulename
 
 def rank_result(data, n):
     reordered_data = {}
-    for user_id in data:
+    for idx, user_id in enumerate(data, 1):
         user_scores = []
         for content_id, content in data[user_id]['suggested_content'].items():
             user_scores.append({
@@ -83,7 +83,10 @@ if __name__ == "__main__":
     result_dict = {}
     total_pairs = 0
 
-    for part_file in part_files:
+    for idx, part_file in enumerate(part_files, 1):
+        file_start = time.time()
+        print(f"[Inference {idx}/{len(part_files)}] Loading {os.path.basename(part_file)}...")
+
         df = pd.read_parquet(part_file).fillna(0)
         exclude = {'username', 'content_id', 'profile_id'}
         to_convert = [col for col in df.columns if col not in exclude]
@@ -100,16 +103,30 @@ if __name__ == "__main__":
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
 
-        for pid, user, cid, score in zip(interaction_df['profile_id'],
-                                        interaction_df['username'],
-                                        interaction_df['content_id'],
-                                        predictions):
+        elapsed_file = time.time() - file_start
+        print(f"  ↪︎ Finished {os.path.basename(part_file)} "
+              f"| {len(df):,} rows | {elapsed_file:.2f}s "
+              f"| Cumulative pairs: {total_pairs:,}")
+
+        for pid, user, cid, score in zip(
+            interaction_df['profile_id'],
+            interaction_df['username'],
+            interaction_df['content_id'],
+            predictions
+        ):
             result_dict.setdefault(pid, {})
             result_dict[pid].setdefault('suggested_content', {})
             result_dict[pid]['suggested_content'][cid] = {
-                'content_name': '', 'tag_names': '', 'type_id': '', 'score': float(score)
+                'content_name': '', 
+                'tag_names': '', 
+                'type_id': '', 
+                'score': float(score)
             }
             result_dict[pid]['user'] = {'username': user, 'profile_id': pid}
+
+
+    print("\nStarting ranking and rule assignment...")
+    rank_start = time.time()
 
     content_movie_df = pd.read_parquet(content_movie_path)
     content_unique = content_movie_df.drop_duplicates(subset='content_id').set_index('content_id')
@@ -126,6 +143,8 @@ if __name__ == "__main__":
 
     reordered_result = rank_result(result_dict, TOP_N)
     result_with_rule = get_rulename(reordered_result, rule_info_path, tags_path)
+
+    print(f"Ranking & rule assignment completed in {time.time()-rank_start:.2f}s")
 
     homepage_rule = []
     rule_content = ""
