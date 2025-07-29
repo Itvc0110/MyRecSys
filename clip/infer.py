@@ -9,7 +9,7 @@ from pathlib import Path
 
 from concurrent.futures import ProcessPoolExecutor
 from user_process import process_user_data
-from item_process import process_movie_item
+from item_process import process_clip_item
 from dcnv3 import DCNv3
 from rule_process import get_rulename_parallel
 
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     # Load data
     print("Loading user & clip data...")
     user_df = process_user_data(user_data_path, "clip/infer_data", num_user=-1, mode='infer')
-    clip_df = process_movie_item(clip_data_path, "clip/infer_data", num_movie=-1, mode='infer')
+    clip_df = process_clip_item(clip_data_path, "clip/infer_data", num_clip=-1, mode='infer')
     clip_df['content_id'] = clip_df['content_id'].astype(str)
     total_users = len(user_df)
     total_clips = len(clip_df)

@@ -6,7 +6,7 @@ import pandas as pd
 import polars as pl
 
 from duration_process import merge_parquet_files
-from item_process import process_movie_item
+from item_process import process_clip_item
 from user_process import process_user_data
 
 
@@ -16,18 +16,18 @@ def process_data(output_filepath):
     os.makedirs(output_dir, exist_ok=True)
 
     duration_folder_path = project_root / "duration"
-    merged_duration_folder_path = project_root / "movie/merged_duration"
+    merged_duration_folder_path = project_root / "clip/merged_duration"
     user_path = project_root / "month_mytv_info.parquet"
-    movie_data_path = project_root / "mytv_vmp_content"
+    clip_data_path = project_root / "mytv_vmp_content"
 
     durations = glob.glob(str(merged_duration_folder_path / "*.parquet"))
     if len(durations) < 1:
         merge_parquet_files(duration_folder_path, merged_duration_folder_path)
         durations = glob.glob(str(merged_duration_folder_path / "*.parquet"))
 
-    user_df = process_user_data(user_path, "movie/train_data", mode='train')
-    movie_df = process_movie_item(movie_data_path, "movie/train_data", mode='train')
-    movie_df['content_id'] = movie_df['content_id'].astype(str)
+    user_df = process_user_data(user_path, "clip/train_data", mode='train')
+    clip_df = process_clip_item(clip_data_path, "clip/train_data", mode='train')
+    clip_df['content_id'] = clip_df['content_id'].astype(str)
 
     all_merged_data = []
     for duration in durations:
@@ -41,8 +41,8 @@ def process_data(output_filepath):
             merged_with_user = pd.merge(duration_df, user_df, on='username', how='inner')
             print(f"→ After user merge: {len(merged_with_user)}")
 
-            final_merged = pd.merge(merged_with_user, movie_df, on='content_id', how='inner')
-            print(f"→ After movie merge: {len(final_merged)}")
+            final_merged = pd.merge(merged_with_user, clip_df, on='content_id', how='inner')
+            print(f"→ After clip merge: {len(final_merged)}")
 
             all_merged_data.append(final_merged)
         except Exception as e:
@@ -67,19 +67,19 @@ def process_data(output_filepath):
         return
 
 
-def generate_user_chunks(user_data_path, movie_data_path, num_user, num_movie, user_batch_size=50):
+def generate_user_chunks(user_data_path, clip_data_path, num_user, num_clip, user_batch_size=50):
     """
-    Instead of saving parquet files, yield each user batch cross-joined with movies.
+    Instead of saving parquet files, yield each user batch cross-joined with clips.
     """
     project_root = Path().resolve()
 
-    print("Loading user & movie data...")
+    print("Loading user & clip data...")
     user_df = process_user_data(user_data_path, "", num_user, mode='infer').head(num_user)
-    movie_df = process_movie_item(movie_data_path, "", num_movie, mode='infer').head(num_movie)
-    movie_df['content_id'] = movie_df['content_id'].astype(str)
+    clip_df = process_clip_item(clip_data_path, "", num_clip, mode='infer').head(num_clip)
+    clip_df['content_id'] = clip_df['content_id'].astype(str)
 
     # Build user profile list
-    merged_duration_folder_path = project_root / "movie/merged_duration"
+    merged_duration_folder_path = project_root / "clip/merged_duration"
     durations = glob.glob(str(merged_duration_folder_path / "*.parquet"))
     user_profile_list = [
         pd.read_parquet(d, columns=["username", "profile_id"]).drop_duplicates()
@@ -89,13 +89,13 @@ def generate_user_chunks(user_data_path, movie_data_path, num_user, num_movie, u
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
 
     total_users = len(user_profile_df)
-    total_movies = len(movie_df)
-    total_expected_rows = total_users * total_movies
+    total_clips = len(clip_df)
+    total_expected_rows = total_users * total_clips
 
     print(f"Loaded {total_users} unique user-profile entries.")
-    print(f"Total movies: {total_movies}")
+    print(f"Total clips: {total_clips}")
     print(f"Estimated total inference rows: {total_expected_rows:,}")
 
     for start_idx in range(0, total_users, user_batch_size):
         batch_users = user_profile_df.iloc[start_idx:start_idx + user_batch_size]
-        yield start_idx, batch_users, movie_df
+        yield start_idx, batch_users, clip_df
