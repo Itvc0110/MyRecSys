@@ -1,6 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 import pandas as pd
 import glob
+import os
 
 def _assign_rule_user(args):
     user_id, suggested_content, rule_dict, tag_mapping = args
