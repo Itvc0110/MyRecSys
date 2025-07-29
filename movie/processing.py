@@ -15,7 +15,7 @@ import polars as pl
 def write_cross_chunk(args):
     i, user_chunk_pd, movie_df_pd, chunk_size, infer_subdir = args
 
-    batch_start = time()
+    start_time = time()
     user_chunk = pl.from_pandas(user_chunk_pd)
     movie_pl = pl.from_pandas(movie_df_pd)
 
@@ -23,7 +23,6 @@ def write_cross_chunk(args):
     cross_chunk = user_chunk.join(movie_pl, how="cross")
     part_file = os.path.join(infer_subdir, f"infer_user_movie_part_{i}.parquet")
 
-    start_time = time()
 
     elapsed = time() - start_time
     print(f"  ↪︎ Saved: {part_file} ({len(cross_chunk)} rows) | Time taken: {elapsed:.2f}s")
@@ -147,9 +146,10 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
     user_chunks = []
     for i in range(0, len(user_profile_df), user_batch_size):
         chunk = user_profile_df.iloc[i:i + user_batch_size]
+        user_chunks.append((i, chunk, movie_df, chunk_size, infer_subdir))
 
     estimated_files = len(user_chunks)
-    print(f"{len(user_chunks)} user chunks will be processed in parallel.")
+    print(f"{estimated_files} user chunks will be processed in parallel.")
     print(f"→ Estimated number of output files: {estimated_files}")
 
     max_workers = cpu_count()
