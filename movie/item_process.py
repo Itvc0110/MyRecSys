@@ -3,8 +3,11 @@ import glob
 import json
 import os
 import joblib
-from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
+from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer, StandardScaler
 from pathlib import Path
+
+ENC_DIR = Path("model/movie/encoder")
+ENC_DIR.mkdir(parents=True, exist_ok=True)
 
 def split_categories(x):
     if pd.isna(x):
@@ -12,25 +15,25 @@ def split_categories(x):
     return str(x).split(',')
 
 def onehot_encode(data):
-    # Prepare encoder directory
-    ENC_DIR = Path("model/movie/encoder")
-    ENC_DIR.mkdir(parents=True, exist_ok=True)
-
-    # 1) FIT & SAVE single‑valued encoder on full data
     single_cols = ["content_country","locked_level","VOD_CODE","contract","type_id"]
     single_path = ENC_DIR / "item_ohe_single.joblib"
     ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
     ohe.fit(data[single_cols])
     joblib.dump(ohe, single_path)
 
-    # 2) FIT & SAVE multi‑valued encoder on full data
+    mlb_lists = data["content_cate_id"].fillna("").apply(split_categories)
     mlb_path = ENC_DIR / "item_mlb_cate.joblib"
     mlb = MultiLabelBinarizer(sparse_output=False)
     lists = data["content_cate_id"].fillna("").apply(split_categories)
-    mlb.fit(lists)
+    mlb.fit(mlb_lists)
     joblib.dump(mlb, mlb_path)
 
-    # 3) TRANSFORM both and drop originals
+    cont_cols = ["content_publish_year", "content_duration"]
+    scaler_path = ENC_DIR / "item_scaler.joblib"
+    scaler = StandardScaler()
+    scaler.fit(data[cont_cols])
+    joblib.dump(scaler, scaler_path)
+
     ohe_arr = ohe.transform(data[single_cols])
     ohe_df  = pd.DataFrame(ohe_arr, columns=ohe.get_feature_names_out(single_cols),
                            index=data.index)
@@ -39,9 +42,12 @@ def onehot_encode(data):
     mlb_df  = pd.DataFrame(mlb_arr,
                            columns=[f"content_cate_id_{c}" for c in mlb.classes_],
                            index=data.index)
+    
+    scaled_arr = scaler.transform(data[cont_cols])
+    scaled_df  = pd.DataFrame(scaled_arr, columns=cont_cols, index=data.index)
 
-    data = data.drop(single_cols + ["content_cate_id"], axis=1)
-    return pd.concat([data, ohe_df, mlb_df], axis=1)
+    data = data.drop(single_cols + ["content_cate_id"] + cont_cols, axis=1)
+    return pd.concat([data, ohe_df, mlb_df, scaled_df], axis=1)
 
 def merge_content_movies(movie_data_path, output_file):
     # unchanged from original…
@@ -58,7 +64,7 @@ def merge_content_movies(movie_data_path, output_file):
     df.to_parquet(output_file, index=False)
     return df
 
-def fit_item_encoder(data, single_cols, mlb_col):
+def fit_item_encoder(data, single_cols, mlb_col, cont_cols):
     ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
     ohe.fit(data[single_cols])
     joblib.dump(ohe, Path("model/movie/encoder/item_ohe_single.joblib"))
@@ -68,18 +74,27 @@ def fit_item_encoder(data, single_cols, mlb_col):
     mlb.fit(lists)
     joblib.dump(mlb, Path("model/movie/encoder/item_mlb_cate.joblib"))
 
-def transform_item_data(data, single_cols, mlb_col):
+    scaler = StandardScaler()
+    scaler.fit(data[cont_cols])
+    joblib.dump(scaler, Path("model/movie/encoder/item_scaler.joblib"))
+
+def transform_item_data(data, single_cols, mlb_col, cont_cols):
     ohe = joblib.load(Path("model/movie/encoder/item_ohe_single.joblib"))
     mlb = joblib.load(Path("model/movie/encoder/item_mlb_cate.joblib"))
+    scaler = joblib.load(ENC_DIR / "item_scaler.joblib")
 
-    lists = data[mlb_col].fillna("").apply(split_categories)
     ohe_arr = ohe.transform(data[single_cols])
-    mlb_arr = mlb.transform(lists)
-
     ohe_df = pd.DataFrame(ohe_arr, columns=ohe.get_feature_names_out(single_cols), index=data.index)
+
+    mlb_lists = data[mlb_col].fillna("").apply(split_categories)
+    mlb_arr = mlb.transform(mlb_lists)
     mlb_df = pd.DataFrame(mlb_arr, columns=[f"content_cate_id_{c}" for c in mlb.classes_], index=data.index)
-    data = data.drop(single_cols + [mlb_col], axis=1)
-    return pd.concat([data, ohe_df, mlb_df], axis=1)
+
+    scaled_arr = scaler.transform(data[cont_cols])
+    scaled_df = pd.DataFrame(scaled_arr, columns=cont_cols, index=data.index)
+
+    data = data.drop(single_cols + [mlb_col] + cont_cols, axis=1)
+    return pd.concat([data, ohe_df, mlb_df, scaled_df], axis=1)
 
 def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     # Load or merge raw movie data
@@ -120,13 +135,14 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     # Encoder setup
     single_cols = ["content_country", "locked_level", "VOD_CODE", "contract", "type_id"]
     mlb_col = "content_cate_id"
+    cont_cols = ["content_publish_year", "content_duration"]
 
     # Train mode: fit and save encoder
     if mode == 'train':
-        fit_item_encoder(movie_df, single_cols, mlb_col)
+        fit_item_encoder(movie_df, single_cols, mlb_col, cont_cols)
 
     # Transform with saved encoder
-    movie_df = transform_item_data(movie_df, single_cols, mlb_col)
+    movie_df = transform_item_data(movie_df, single_cols, mlb_col, cont_cols)
 
     # Slice movie data if needed
     if num_movie != -1:

@@ -6,6 +6,7 @@ from user_process import process_user_data
 import glob
 from time import time
 from math import ceil
+import numpy as np
 import os
 from pathlib import Path
 import pandas as pd
