@@ -122,21 +122,24 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
 
     merged_duration_folder_path = os.path.join(project_root, "movie/merged_duration")
     durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
+
     user_profile_list = []
     for duration in durations:
         try:
-            df = pd.read_parquet(duration, columns=["username", "profile_id"])
-            user_profile_list.append(df.drop_duplicates())
+            df = pl.read_parquet(duration).select(["username", "profile_id"]).unique()
+            user_profile_list.append(df)
         except Exception as e:
             print(f"Error reading {duration}: {e}")
+
     if not user_profile_list:
         print("No duration data available.")
         return
 
-    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
-    user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
+    user_profile_df = pl.concat(user_profile_list).unique(subset=["username", "profile_id"])
+    user_profile_pd = user_profile_df.to_pandas()
+    user_profile_pd = user_profile_pd.merge(user_df, on="username", how="inner")
 
-    total_users = len(user_profile_df)
+    total_users = len(user_profile_pd)
     total_movies = len(movie_df)
     total_expected_rows = total_users * total_movies
 
@@ -145,11 +148,12 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
     print(f"Estimated total inference rows: {total_expected_rows:,}")
 
     user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
-    user_profile_df.to_parquet(user_profile_path, index=False)
+    pl.from_pandas(user_profile_pd).write_parquet(user_profile_path)
 
+    # --- Prepare user chunks for parallel processing ---
     user_chunks = []
-    for i in range(0, len(user_profile_df), user_batch_size):
-        chunk = user_profile_df.iloc[i:i + user_batch_size]
+    for i in range(0, len(user_profile_pd), user_batch_size):
+        chunk = user_profile_pd.iloc[i:i + user_batch_size]
         user_chunks.append((i, chunk, movie_df, chunk_size, infer_subdir))
 
     estimated_files = len(user_chunks)
