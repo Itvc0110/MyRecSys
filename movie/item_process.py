@@ -80,7 +80,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
             'tag_names': str,
             'content_duration': 'float32',
             'content_status': str,
-            'locked_level': str,
+            # 'locked_level': str,
             'VOD_CODE': str,
             'content_cate_id': str,
         }
@@ -96,11 +96,13 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     # Keep only needed columns
     cols = ['content_id','content_single','content_publish_year','content_country',
             'type_id','tag_names','content_duration','content_status',
-            'locked_level','VOD_CODE','content_cate_id']
+            #'locked_level',
+            'VOD_CODE','content_cate_id']
     movie_df = movie_df[cols]
 
     # Encoder setup
-    single_cols = ["content_country", "locked_level", "VOD_CODE", "type_id"]
+    single_cols = ["content_country", #"locked_level", 
+                   "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
     cont_cols = ["content_publish_year", "content_duration"]
 
