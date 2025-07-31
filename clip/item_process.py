@@ -74,7 +74,7 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
         dtype_spec = {
             'content_id': str,
             'content_publish_year': 'float32',
-            'content_country': str,
+            # 'content_country': str,
             'type_id': str,
             'tag_names': str,
             'content_duration': 'float32',
@@ -93,13 +93,14 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
     clip_df["content_publish_year"] = clip_df["content_publish_year"].fillna(clip_df["content_publish_year"].mean())
 
     # Keep only needed columns
-    cols = ['content_id','content_publish_year','content_country',
+    cols = ['content_id','content_publish_year', #'content_country',
             'type_id','tag_names','content_duration','content_status',
             'locked_level','VOD_CODE','content_cate_id']
     clip_df = clip_df[cols]
 
     # Encoder setup
-    single_cols = ["content_country", "locked_level", "VOD_CODE", "type_id"]
+    single_cols = [#"content_country", 
+                   "locked_level", "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
     cont_cols = ["content_publish_year", "content_duration"]
 
