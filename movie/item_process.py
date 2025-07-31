@@ -75,7 +75,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
             'content_id': str,
             'content_single': str,
             'content_publish_year': 'float32',
-            'content_country': str,
+            #'content_country': str,
             'type_id': str,
             'tag_names': str,
             'content_duration': 'float32',
@@ -95,13 +95,15 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     movie_df["content_publish_year"] = movie_df["content_publish_year"].fillna(movie_df["content_publish_year"].mean())
 
     # Keep only needed columns
-    cols = ['content_id','content_single','content_publish_year','content_country',
+    cols = ['content_id','content_single','content_publish_year',
+            #'content_country',
             'type_id','tag_names','content_duration','content_status',
             'locked_level','VOD_CODE','content_cate_id']
     movie_df = movie_df[cols]
 
     # Encoder setup
-    single_cols = ["content_country", "locked_level", "VOD_CODE", "type_id"]
+    single_cols = [#"content_country", 
+                   "locked_level", "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
     cont_cols = ["content_publish_year", "content_duration"]
 
