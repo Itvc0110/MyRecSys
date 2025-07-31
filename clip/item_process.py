@@ -3,45 +3,16 @@ import glob
 import json
 import os
 import joblib
-from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
+from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer, StandardScaler
 from pathlib import Path
+
+ENC_DIR = Path("model/clip/encoder")
+ENC_DIR.mkdir(parents=True, exist_ok=True)
 
 def split_categories(x):
     if pd.isna(x):
         return []
     return str(x).split(',')
-
-def onehot_encode(data):
-    # Prepare encoder directory
-    ENC_DIR = Path("model/clip/encoder")
-    ENC_DIR.mkdir(parents=True, exist_ok=True)
-
-    # 1) FIT & SAVE single‑valued encoder on full data
-    single_cols = ["content_country","locked_level","VOD_CODE","contract","type_id"]
-    single_path = ENC_DIR / "item_ohe_single.joblib"
-    ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-    ohe.fit(data[single_cols])
-    joblib.dump(ohe, single_path)
-
-    # 2) FIT & SAVE multi‑valued encoder on full data
-    mlb_path = ENC_DIR / "item_mlb_cate.joblib"
-    mlb = MultiLabelBinarizer(sparse_output=False)
-    lists = data["content_cate_id"].fillna("").apply(split_categories)
-    mlb.fit(lists)
-    joblib.dump(mlb, mlb_path)
-
-    # 3) TRANSFORM both and drop originals
-    ohe_arr = ohe.transform(data[single_cols])
-    ohe_df  = pd.DataFrame(ohe_arr, columns=ohe.get_feature_names_out(single_cols),
-                           index=data.index)
-
-    mlb_arr = mlb.transform(lists)
-    mlb_df  = pd.DataFrame(mlb_arr,
-                           columns=[f"content_cate_id_{c}" for c in mlb.classes_],
-                           index=data.index)
-
-    data = data.drop(single_cols + ["content_cate_id"], axis=1)
-    return pd.concat([data, ohe_df, mlb_df], axis=1)
 
 def merge_content_clips(clip_data_path, output_file):
     # unchanged from original…
@@ -58,7 +29,7 @@ def merge_content_clips(clip_data_path, output_file):
     df.to_parquet(output_file, index=False)
     return df
 
-def fit_item_encoder(data, single_cols, mlb_col):
+def fit_item_encoder(data, single_cols, mlb_col, cont_cols):
     ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
     ohe.fit(data[single_cols])
     joblib.dump(ohe, Path("model/clip/encoder/item_ohe_single.joblib"))
@@ -68,18 +39,27 @@ def fit_item_encoder(data, single_cols, mlb_col):
     mlb.fit(lists)
     joblib.dump(mlb, Path("model/clip/encoder/item_mlb_cate.joblib"))
 
-def transform_item_data(data, single_cols, mlb_col):
+    scaler = StandardScaler()
+    scaler.fit(data[cont_cols])
+    joblib.dump(scaler, Path("model/clip/encoder/item_scaler.joblib"))
+
+def transform_item_data(data, single_cols, mlb_col, cont_cols):
     ohe = joblib.load(Path("model/clip/encoder/item_ohe_single.joblib"))
     mlb = joblib.load(Path("model/clip/encoder/item_mlb_cate.joblib"))
+    scaler = joblib.load(ENC_DIR / "item_scaler.joblib")
 
-    lists = data[mlb_col].fillna("").apply(split_categories)
     ohe_arr = ohe.transform(data[single_cols])
-    mlb_arr = mlb.transform(lists)
-
     ohe_df = pd.DataFrame(ohe_arr, columns=ohe.get_feature_names_out(single_cols), index=data.index)
+
+    mlb_lists = data[mlb_col].fillna("").apply(split_categories)
+    mlb_arr = mlb.transform(mlb_lists)
     mlb_df = pd.DataFrame(mlb_arr, columns=[f"content_cate_id_{c}" for c in mlb.classes_], index=data.index)
-    data = data.drop(single_cols + [mlb_col], axis=1)
-    return pd.concat([data, ohe_df, mlb_df], axis=1)
+
+    scaled_arr = scaler.transform(data[cont_cols])
+    scaled_df = pd.DataFrame(scaled_arr, columns=cont_cols, index=data.index)
+
+    data = data.drop(single_cols + [mlb_col] + cont_cols, axis=1)
+    return pd.concat([data, ohe_df, mlb_df, scaled_df], axis=1)
 
 def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
     # Load or merge raw clip data
@@ -93,7 +73,6 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
     else:
         dtype_spec = {
             'content_id': str,
-            'content_single': str,
             'content_publish_year': 'float32',
             'content_country': str,
             'type_id': str,
@@ -101,7 +80,6 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
             'content_duration': 'float32',
             'content_status': str,
             'locked_level': str,
-            'contract': str,
             'VOD_CODE': str,
             'content_cate_id': str,
         }
@@ -111,22 +89,26 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
     clip_df['content_duration'] = pd.to_numeric(clip_df['content_duration'], errors='coerce')
     clip_df = clip_df[clip_df['content_duration'] > 0]
 
+    clip_df["content_publish_year"] = pd.to_numeric(clip_df["content_publish_year"].astype(str).str[:4], errors='coerce')
+    clip_df["content_publish_year"] = clip_df["content_publish_year"].fillna(clip_df["content_publish_year"].mean())
+
     # Keep only needed columns
-    cols = ['content_id','content_single','content_publish_year','content_country',
+    cols = ['content_id','content_publish_year','content_country',
             'type_id','tag_names','content_duration','content_status',
-            'locked_level','contract','VOD_CODE','content_cate_id']
+            'locked_level','VOD_CODE','content_cate_id']
     clip_df = clip_df[cols]
 
     # Encoder setup
-    single_cols = ["content_country", "locked_level", "VOD_CODE", "contract", "type_id"]
+    single_cols = ["content_country", "locked_level", "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
+    cont_cols = ["content_publish_year", "content_duration"]
 
     # Train mode: fit and save encoder
     if mode == 'train':
-        fit_item_encoder(clip_df, single_cols, mlb_col)
+        fit_item_encoder(clip_df, single_cols, mlb_col, cont_cols)
 
     # Transform with saved encoder
-    clip_df = transform_item_data(clip_df, single_cols, mlb_col)
+    clip_df = transform_item_data(clip_df, single_cols, mlb_col, cont_cols)
 
     # Slice clip data if needed
     if num_clip != -1:

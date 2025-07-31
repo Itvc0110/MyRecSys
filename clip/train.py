@@ -59,6 +59,9 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
             inputs = inputs.to(device)
             labels = labels.to(device)
 
+            if batch_idx == 0:
+                print(f"[DEBUG] Training batch {batch_idx} input shape: {inputs.shape}")
+
             optimizer.zero_grad()
             output = model(inputs)
             loss = loss_fn(output['y_pred'], labels, output['y_d'], output['y_s'])
