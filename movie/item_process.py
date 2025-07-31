@@ -92,7 +92,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     movie_df = movie_df[movie_df['content_duration'] > 0]
 
     movie_df["content_publish_year"] = pd.to_numeric(movie_df["content_publish_year"].astype(str).str[:4], errors='coerce')
-    movie_df["content_publish_year"].fillna(movie_df["content_publish_year"].mean(), inplace=True)
+    movie_df["content_publish_year"] = movie_df["content_publish_year"].fillna(movie_df["content_publish_year"].mean())
 
     # Keep only needed columns
     cols = ['content_id','content_single','content_publish_year','content_country',
