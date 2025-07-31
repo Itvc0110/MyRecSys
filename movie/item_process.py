@@ -14,41 +14,6 @@ def split_categories(x):
         return []
     return str(x).split(',')
 
-def onehot_encode(data):
-    single_cols = ["content_country","locked_level","VOD_CODE","contract","type_id"]
-    single_path = ENC_DIR / "item_ohe_single.joblib"
-    ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-    ohe.fit(data[single_cols])
-    joblib.dump(ohe, single_path)
-
-    mlb_lists = data["content_cate_id"].fillna("").apply(split_categories)
-    mlb_path = ENC_DIR / "item_mlb_cate.joblib"
-    mlb = MultiLabelBinarizer(sparse_output=False)
-    lists = data["content_cate_id"].fillna("").apply(split_categories)
-    mlb.fit(mlb_lists)
-    joblib.dump(mlb, mlb_path)
-
-    cont_cols = ["content_publish_year", "content_duration"]
-    scaler_path = ENC_DIR / "item_scaler.joblib"
-    scaler = StandardScaler()
-    scaler.fit(data[cont_cols])
-    joblib.dump(scaler, scaler_path)
-
-    ohe_arr = ohe.transform(data[single_cols])
-    ohe_df  = pd.DataFrame(ohe_arr, columns=ohe.get_feature_names_out(single_cols),
-                           index=data.index)
-
-    mlb_arr = mlb.transform(lists)
-    mlb_df  = pd.DataFrame(mlb_arr,
-                           columns=[f"content_cate_id_{c}" for c in mlb.classes_],
-                           index=data.index)
-    
-    scaled_arr = scaler.transform(data[cont_cols])
-    scaled_df  = pd.DataFrame(scaled_arr, columns=cont_cols, index=data.index)
-
-    data = data.drop(single_cols + ["content_cate_id"] + cont_cols, axis=1)
-    return pd.concat([data, ohe_df, mlb_df, scaled_df], axis=1)
-
 def merge_content_movies(movie_data_path, output_file):
     # unchanged from original…
     movie_files = glob.glob(f'{movie_data_path}/**/content_movie_*.json', recursive=True)
@@ -125,6 +90,8 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     # Clean durations
     movie_df['content_duration'] = pd.to_numeric(movie_df['content_duration'], errors='coerce')
     movie_df = movie_df[movie_df['content_duration'] > 0]
+
+    movie_df["content_publish_year"] = pd.to_numeric(movie_df["content_publish_year"], errors='coerce').fillna(movie_df["content_publish_year"].mean())
 
     # Keep only needed columns
     cols = ['content_id','content_single','content_publish_year','content_country',
