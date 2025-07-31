@@ -14,22 +14,31 @@ from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
 from rule_process import get_rulename
 
-def _rank_user(args):
-    user_id, suggested_content, top_n = args
-    user_scores = [
-        (cid, content['score'], content)
-        for cid, content in suggested_content.items()
-    ]
-    top_items = sorted(user_scores, key=lambda x: x[1], reverse=True)[:top_n]
-    return user_id, {
-        'suggested_content': {cid: content for cid, _, content in top_items}
-    }
-
-def rank_result_parallel(data, n, max_workers=None):
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        args = [(uid, user_data['suggested_content'], n) for uid, user_data in data.items()]
-        results = list(executor.map(_rank_user, args))
-    return {uid: {'suggested_content': sc, 'user': data[uid]['user']} for uid, sc in results}
+def rank_result(data, n):
+    reordered_data = {}
+    for user_id in data:
+        user_scores = []
+        for content_id, content in data[user_id]['suggested_content'].items():
+            user_scores.append({
+                'content_id': content_id,
+                'content_name': content['content_name'],
+                'tag_names': content['tag_names'],
+                'type_id': content['type_id'],
+                'score': content['score']
+            })
+        sorted_user_scores = sorted(user_scores, key=lambda x: x['score'], reverse=True)[:n]
+        reordered_data[user_id] = {
+            'suggested_content': {
+                film['content_id']: {
+                    'content_name': film['content_name'],
+                    'tag_names': film['tag_names'],
+                    'type_id': film['type_id'],
+                    'score': film['score']
+                } for film in sorted_user_scores
+            },
+            'user': data[user_id]['user']
+        }
+    return reordered_data
 
 def infer(model, data, device):
     model.eval()
@@ -141,7 +150,7 @@ if __name__ == "__main__":
 
     print("\nStarting parallel ranking...")
     rank_start = time.time()
-    reordered_result = rank_result_parallel(result_dict, TOP_N, max_workers=os.cpu_count())
+    reordered_result = rank_result(result_dict, TOP_N)
     print(f"Ranking completed in {time.time()-rank_start:.2f}s")
 
     print("\nStarting parallel rule assignment...")

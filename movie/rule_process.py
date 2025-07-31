@@ -1,6 +1,5 @@
 import pandas as pd
 import glob
-import os
 
 def get_tag_mapping(tags_path):
     content_to_tag_file = glob.glob(f"{tags_path}/*/*.json")
