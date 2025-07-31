@@ -12,7 +12,7 @@ from concurrent.futures import ProcessPoolExecutor
 from processing import process_infer_data
 from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
-from rule_process import get_rulename_parallel
+from rule_process import get_rulename
 
 def _rank_user(args):
     user_id, suggested_content, top_n = args
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     print("\nStarting parallel rule assignment...")
     rule_start = time.time()
-    result_with_rule = get_rulename_parallel(reordered_result, rule_info_path, tags_path)
+    result_with_rule = get_rulename(reordered_result, rule_info_path, tags_path)
     print(f"Rule assignment completed in {time.time()-rule_start:.2f}s")
 
     print(f"Ranking & rule assignment completed in {time.time()-rank_start:.2f}s")
