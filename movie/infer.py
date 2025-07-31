@@ -71,8 +71,8 @@ if __name__ == "__main__":
 
     part_files = sorted(glob(str(project_root / "movie/infer_data/infer_user_movie/infer_user_movie_part_*.parquet")))
     if not part_files:
-        process_infer_data(user_data_path, movie_data_path, num_user=80, num_movie=-1, output_dir_path="movie/infer_data",
-                        user_batch_size=40, chunk_size=None, max_files=-1)
+        process_infer_data(user_data_path, movie_data_path, num_user=-1, num_movie=-1, output_dir_path="movie/infer_data",
+                        user_batch_size=50, chunk_size=None, max_files=-1)
         part_files = sorted(glob(str(project_root / "movie/infer_data/infer_user_movie/infer_user_movie_part_*.parquet")))
 
     checkpoint_path = "model/movie/best_model.pth"
