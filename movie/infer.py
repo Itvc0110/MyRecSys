@@ -44,8 +44,12 @@ def infer(model, data, device):
     model.eval()
     predictions = []
     with torch.no_grad():
-        for batch in tqdm(data, desc="Inference"):
+        for batch_idx, batch in enumerate(tqdm(data, desc="Inference")):
             inputs = batch[0].to(device)
+
+            if batch_idx == 0:
+                print(f"[DEBUG] Inference batch {batch_idx} input shape: {inputs.shape}")
+
             outputs = model(inputs)
             predictions.extend(outputs['y_pred'].detach().cpu().numpy())
             torch.cuda.empty_cache()
