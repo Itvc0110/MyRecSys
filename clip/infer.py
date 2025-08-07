@@ -70,13 +70,7 @@ if __name__ == "__main__":
     rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
     rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
-    part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip/infer_user_clip_part_*.parquet")))
-    if not part_files:
-        process_infer_data(user_data_path, clip_data_path, num_user=80, num_clip=-1, output_dir_path="clip/infer_data",
-                        user_batch_size=10, chunk_size=None, max_files=-1)
-        part_files = sorted(glob(str(project_root / "clip/infer_data/infer_user_clip/infer_user_clip_part_*.parquet")))
-
-    checkpoint_path = "model/clip/best_model.pth"
+    checkpoint_path = "model/movie/best_model.pth"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     checkpoint = torch.load(checkpoint_path, map_location=device)
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
@@ -84,18 +78,23 @@ if __name__ == "__main__":
     model.load_state_dict(checkpoint["model_state_dict"])
 
     result_dict = {}
-    total_pairs = 0
 
-    for idx, part_file in enumerate(part_files, 1):
-        file_start = time.time()
-        print(f"[Inference {idx}/{len(part_files)}] Loading {os.path.basename(part_file)}...")
+    print("Generating user-clip cross joins in memory...")
+    chunks = process_infer_data(user_data_path, clip_data_path,
+                                num_user=80, num_clip=-1,
+                                output_dir_path="clip/infer_data",
+                                user_batch_size=10,
+                                chunk_size=None,
+                                max_files=-1,
+                                return_chunks=True)
 
-        df = pl.read_parquet(part_file).fill_null(0).to_pandas()
+    for idx, df in enumerate(chunks, 1):
+        print(f"[Inference {idx}/{len(chunks)}] Processing in-memory chunk with {len(df)} rows")
+
         exclude = {'username', 'content_id', 'profile_id'}
         to_convert = [col for col in df.columns if col not in exclude]
         df[to_convert] = df[to_convert].apply(pd.to_numeric, errors='coerce')
-        df = df.dropna()
-        df = df.astype({col: 'float32' for col in to_convert})
+        df = df.dropna().astype({col: 'float32' for col in to_convert})
 
         interaction_df = df[['username', 'content_id', 'profile_id']]
         features = df.drop(columns=['username', 'content_id', 'profile_id'])
@@ -106,11 +105,6 @@ if __name__ == "__main__":
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
 
-        elapsed_file = time.time() - file_start
-        print(f"  ↪︎ Finished {os.path.basename(part_file)} "
-              f"| {len(df):,} rows | {elapsed_file:.2f}s "
-              f"| Cumulative pairs: {total_pairs:,}")
-
         for pid, user, cid, score in zip(
             interaction_df['profile_id'],
             interaction_df['username'],
@@ -120,9 +114,9 @@ if __name__ == "__main__":
             result_dict.setdefault(pid, {})
             result_dict[pid].setdefault('suggested_content', {})
             result_dict[pid]['suggested_content'][cid] = {
-                'content_name': '', 
-                'tag_names': '', 
-                'type_id': '', 
+                'content_name': '',
+                'tag_names': '',
+                'type_id': '',
                 'score': float(score)
             }
             result_dict[pid]['user'] = {'username': user, 'profile_id': pid}

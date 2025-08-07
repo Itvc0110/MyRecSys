@@ -149,27 +149,25 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
     user_profile_df.to_parquet(user_profile_path, index=False)
 
-    user_chunks = []
+    cross_chunks = []
+
     for i in range(0, len(user_profile_df), user_batch_size):
-        chunk = user_profile_df.iloc[i:i + user_batch_size]
-        user_chunks.append((i, chunk, clip_df, chunk_size, infer_subdir))
+        user_chunk = user_profile_df.iloc[i:i + user_batch_size]
+        user_pl = pl.from_pandas(user_chunk)
+        clip_pl = pl.from_pandas(clip_df)
 
-    estimated_files = len(user_chunks)
-    print(f"{estimated_files} user chunks will be processed in parallel.")
-    print(f"→ Estimated number of output files: {estimated_files}")
+        cross = user_pl.join(clip_pl, how="cross")
+        cross_df = cross.to_pandas().fillna(0)
 
-    max_workers = cpu_count()
-    print(f"Starting parallel processing with {max_workers} workers...")
+        cross_chunks.append(cross_df)
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        row_counts = list(executor.map(write_cross_chunk, user_chunks))
+        print(f"Generated cross-chunk {i // user_batch_size + 1}: {len(cross_df)} rows")
+
+    estimated_files = len(cross_chunks)
+    print(f"{estimated_files} user chunks will be processed")
 
     elapsed = time() - start_time
-    total_rows_written = sum(row_counts)
 
-    print("\nAll user batches merged and saved.")
-    print(f"Actual number of files saved: {len(row_counts)}")
-    print(f"Actual total rows written: {total_rows_written:,}")
+    print("\nAll user batches proccessed.")
     print(f"Time taken to save all files: {elapsed:.2f} seconds")
-    print(f"Estimated inference batches: {len(row_counts)}")
-    print(f"max_files={max_files} (currently unused in this mode)")
+    print(f"max_chunks={max_files} (currently unused in this mode)")
