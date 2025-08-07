@@ -1,173 +1,204 @@
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import cpu_count
-from duration_process import merge_parquet_files
-from item_process import process_clip_item
-from user_process import process_user_data
-import glob
-from time import time
-from math import ceil
-import numpy as np
 import os
-from pathlib import Path
 import pandas as pd
 import polars as pl
+import torch
+from tqdm import tqdm
+import json
+import time
+from pathlib import Path
+from torch.utils.data import DataLoader, TensorDataset
 
-def write_cross_chunk(args):
-    i, user_chunk_pd, clip_df_pd, chunk_size, infer_subdir = args
+from processing import process_infer_data
+from item_process import process_clip_item
+from rule_process import get_rulename
+from dcnv3 import DCNv3
 
-    batch_start = time()
-    user_chunk = pl.from_pandas(user_chunk_pd)
-    clip_pl = pl.from_pandas(clip_df_pd)
+def rank_result(data, n):
+    reordered_data = {}
+    for user_id in data:
+        user_scores = []
+        for content_id, content in data[user_id]['suggested_content'].items():
+            user_scores.append({
+                'content_id': content_id,
+                'content_name': content['content_name'],
+                'tag_names': content['tag_names'],
+                'type_id': content['type_id'],
+                'score': content['score']
+            })
+        sorted_user_scores = sorted(user_scores, key=lambda x: x['score'], reverse=True)[:n]
+        reordered_data[user_id] = {
+            'suggested_content': {
+                film['content_id']: {
+                    'content_name': film['content_name'],
+                    'tag_names': film['tag_names'],
+                    'type_id': film['type_id'],
+                    'score': film['score']
+                } for film in sorted_user_scores
+            },
+            'user': data[user_id]['user']
+        }
+    return reordered_data
 
-    # Cross join
-    cross_chunk = user_chunk.join(clip_pl, how="cross")
+def infer(model, data, device):
+    model.eval()
+    predictions = []
+    with torch.no_grad():
+        for batch in tqdm(data, desc="Inference", leave=False):
+            inputs = batch[0].to(device)
+            outputs = model(inputs)
+            predictions.extend(outputs['y_pred'].detach().cpu().numpy())
+            torch.cuda.empty_cache()
+    return predictions
 
-    # Save to parquet
-    part_file = os.path.join(infer_subdir, f"infer_user_clip_part_{i}.parquet")
-    io_start = time()
-    cross_chunk.write_parquet(part_file)
-    io_elapsed = time() - io_start
-    batch_elapsed = time() - batch_start
+if __name__ == "__main__":
+    start_time = time.time()
+    TOP_N = 200
 
-    print(f"  ↪︎ Saved: {part_file} ({len(cross_chunk)} rows) "
-          f"| Batch {batch_elapsed:.2f}s | I/O {io_elapsed:.2f}s")
-
-    return len(cross_chunk)
-
-
-def process_data(output_filepath):
     project_root = Path().resolve()
+    result_dir = project_root / "clip" / "result"
+    os.makedirs(result_dir, exist_ok=True)
+    os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
-    output_dir = os.path.dirname(output_filepath)
-    os.makedirs(output_dir, exist_ok=True)
+    user_data_path = project_root / "month_mytv_info.parquet"
+    clip_data_path = project_root / "mytv_vmp_content"
+    tags_path = project_root / "tags"
+    rule_info_path = project_root / "rule_info.parquet"
 
-    duration_folder_path = "duration"
-    duration_folder_path = os.path.join(project_root, duration_folder_path)
+    # Load model
+    print("Loading model...")
+    checkpoint_path = "model/clip/best_model.pth"
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
 
-    merged_duration_folder_path = "clip/merged_duration"
-    merged_duration_folder_path = os.path.join(project_root, merged_duration_folder_path)
+    model = DCNv3(input_dim)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
-    user_path = "month_mytv_info.parquet"
-    user_path = os.path.join(project_root, user_path)
-
-    clip_data_path = "mytv_vmp_content"
-    clip_data_path = os.path.join(project_root, clip_data_path)
-
-    durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
-    if len(durations)<1:
-        merge_parquet_files(duration_folder_path, merged_duration_folder_path)
-        durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
-
-    user_df = process_user_data(user_path, "clip/train_data", mode='train')
-    clip_df = process_clip_item(clip_data_path, "clip/train_data", mode='train')
+    # Load content metadata
+    print("Loading content metadata...")
+    clip_df = process_clip_item(clip_data_path, output_dir_path="clip/infer_data", num_clip=-1, mode="infer")
     clip_df['content_id'] = clip_df['content_id'].astype(str)
 
-    all_merged_data = []
+    content_unique = (
+        pl.from_pandas(clip_df)
+        .unique(subset=['content_id'])
+        .select(['content_id', 'content_name', 'tag_names', 'type_id'])
+    )
 
-    for duration in durations:
-        try:
-            duration_df = pd.read_parquet(duration)
-            duration_df['content_id'] = duration_df['content_id'].astype(str)
+    content_dict = {
+        row[0]: (row[1], row[2], row[3])
+        for row in content_unique.iter_rows()
+    }
 
-            print(f"\nProcessing {os.path.basename(duration)}")
-            print(f"→ Duration rows: {len(duration_df)}")
+    # Generate in-memory user-content pairs
+    print("Generating user-clip cross joins in memory...")
+    chunks = process_infer_data(
+        user_data_path, clip_data_path,
+        num_user=80, num_clip=-1,
+        output_dir_path="clip/infer_data",
+        user_batch_size=10,
+        chunk_size=None,
+        max_files=-1,
+        return_chunks=True
+    )
 
-            merged_with_user = pd.merge(duration_df, user_df, on='username', how='inner')
-            print(f"→ After user merge: {len(merged_with_user)}")
+    total_pairs = 0
+    all_results, all_rulename_json, all_rule_content_lines = [], [], []
 
-            final_merged = pd.merge(merged_with_user, clip_df, on='content_id', how='inner')
-            print(f"→ After clip merge: {len(final_merged)}")
+    for idx, df in enumerate(chunks, 1):
+        print(f"\n[Chunk {idx}/{len(chunks)}] Processing {len(df)} rows...")
 
-            all_merged_data.append(final_merged)
-        except Exception as e:
-            print(f"Error processing {duration}: {str(e)}")
+        exclude = {'username', 'content_id', 'profile_id'}
+        to_convert = [col for col in df.columns if col not in exclude]
+        df[to_convert] = df[to_convert].apply(pd.to_numeric, errors='coerce')
+        df = df.dropna().astype({col: 'float32' for col in to_convert})
 
-    if all_merged_data:
-        combined_df = pd.concat(all_merged_data, ignore_index=True)
-        print(f"\nTotal merged rows before drop duplicates: {len(combined_df)}")
+        interaction_df = df[['username', 'content_id', 'profile_id']]
+        features = df.drop(columns=['username', 'content_id', 'profile_id'])
 
-        combined_df = combined_df.drop_duplicates()
-        print(f"→ After drop_duplicates: {len(combined_df)}")
+        infer_tensor = torch.tensor(features.to_numpy(), dtype=torch.float32)
+        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
 
-        combined_df['content_duration'] = combined_df['content_duration'].astype(float)
-        combined_df['duration'] = combined_df['duration'].astype(float)
-        combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
-        combined_df['label'] = (combined_df['percent_duration'] > 0.3).astype(int)
-        combined_df = combined_df.drop(columns=['percent_duration', 'duration'], inplace=False)
-        combined_df['content_duration'] = np.log(combined_df['content_duration'])
+        predictions = infer(model, infer_loader, device)
+        total_pairs += len(predictions)
 
-        combined_df.to_parquet(output_filepath, index=False)
-        return combined_df
-    else:
-        return
+        result_dict = {}
+        for pid, user, cid, score in zip(
+            interaction_df['profile_id'],
+            interaction_df['username'],
+            interaction_df['content_id'],
+            predictions
+        ):
+            result_dict.setdefault(pid, {})
+            result_dict[pid].setdefault('suggested_content', {})
+            result_dict[pid]['suggested_content'][cid] = {
+                'content_name': '',
+                'tag_names': '',
+                'type_id': '',
+                'score': float(score)
+            }
+            result_dict[pid]['user'] = {'username': user, 'profile_id': pid}
 
+        for pid, pdata in result_dict.items():
+            for cid, cdata in pdata['suggested_content'].items():
+                meta = content_dict.get(cid)
+                if meta:
+                    cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
 
-    
-def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, output_dir_path,
-                       user_batch_size=20, chunk_size=None, max_files=-1):
-    start_time = time()
-    project_root = Path().resolve()
-    output_dir = os.path.join(project_root, output_dir_path)
-    os.makedirs(output_dir, exist_ok=True)
+        ranked = rank_result(result_dict, TOP_N)
+        ruled = get_rulename(ranked, rule_info_path, tags_path)
 
-    infer_subdir = os.path.join(output_dir, "infer_user_clip")
-    os.makedirs(infer_subdir, exist_ok=True)
+        homepage_rule = []
+        rule_content = ""
+        for pid, info in ruled.items():
+            rulename_json_file = {'pid': pid, 'd': {}}
+            rule_content += str(pid) + '|'
 
-    print("Loading user & clip data...")
-    user_df = process_user_data(user_data_path, output_dir_path, num_user, mode='infer').head(num_user)
-    clip_df = process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer').head(num_clip)
-    clip_df['content_id'] = clip_df['content_id'].astype(str)
+            for cid, content in info['suggested_content'].items():
+                if content['rule_id'] != -100:
+                    rulename_json_file['d'].setdefault(str(content['rule_id']), {})[cid] = content['type_id']
 
-    if chunk_size is None:
-        chunk_size = user_batch_size * len(clip_df)
-    print(f"chunk_size set to {chunk_size} (user_batch_size × num_clips)")
+            for rule, content_ids in rulename_json_file['d'].items():
+                rule_content += str(rule) + ',' + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
 
-    merged_duration_folder_path = os.path.join(project_root, "clip/merged_duration")
-    durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
-    user_profile_list = []
-    for duration in durations:
-        try:
-            df = pd.read_parquet(duration, columns=["username", "profile_id"])
-            user_profile_list.append(df.drop_duplicates())
-        except Exception as e:
-            print(f"Error reading {duration}: {e}")
-    if not user_profile_list:
-        print("No duration data available.")
-        return
+            rule_content = rule_content.rstrip(';') + '\n'
+            rulename_json_file['d'] = ','.join(rulename_json_file['d'])
+            homepage_rule.append(rulename_json_file)
 
-    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
-    user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
+        all_results.append(ruled)
+        all_rulename_json.extend(homepage_rule)
+        all_rule_content_lines.append(rule_content)
 
-    total_users = len(user_profile_df)
-    total_clips = len(clip_df)
-    total_expected_rows = total_users * total_clips
+        # Optional: save intermediate per-chunk files
+        # with open(result_dir / f"result_chunk_{idx}.json", 'w', encoding='utf-8') as f:
+        #     json.dump(ruled, f, indent=4, ensure_ascii=False)
+        # with open(result_dir / f"rulename_chunk_{idx}.json", 'w', encoding='utf-8') as f:
+        #     json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
+        # with open(result_dir / f"rule_content_chunk_{idx}.txt", 'w", encoding='utf-8') as f:
+        #     f.write(rule_content)
 
-    print(f"Loaded {total_users} unique user-profile entries.")
-    print(f"Total clips: {total_clips}")
-    print(f"Estimated total inference rows: {total_expected_rows:,}")
+    # Combine all chunked results
+    merged_result = {}
+    for chunk in all_results:
+        merged_result.update(chunk)
 
-    user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
-    user_profile_df.to_parquet(user_profile_path, index=False)
+    with open(result_dir / "result.json", 'w', encoding='utf-8') as f:
+        json.dump(merged_result, f, indent=4, ensure_ascii=False)
 
-    cross_chunks = []
+    with open(result_dir / "rulename.json", 'w', encoding='utf-8') as f:
+        json.dump(all_rulename_json, f, indent=4, ensure_ascii=False)
 
-    for i in range(0, len(user_profile_df), user_batch_size):
-        user_chunk = user_profile_df.iloc[i:i + user_batch_size]
-        user_pl = pl.from_pandas(user_chunk)
-        clip_pl = pl.from_pandas(clip_df)
+    with open(result_dir / "rule_content.txt", 'w', encoding='utf-8') as f:
+        f.writelines(all_rule_content_lines)
 
-        cross = user_pl.join(clip_pl, how="cross")
-        cross_df = cross.to_pandas().fillna(0)
+    # Optional: delete per-chunk files if previously saved
+    # import glob
+    # for f in glob.glob(str(result_dir / "result_chunk_*.json")): os.remove(f)
+    # for f in glob.glob(str(result_dir / "rulename_chunk_*.json")): os.remove(f)
+    # for f in glob.glob(str(result_dir / "rule_content_chunk_*.txt")): os.remove(f)
 
-        cross_chunks.append(cross_df)
-
-        print(f"Generated cross-chunk {i // user_batch_size + 1}: {len(cross_df)} rows")
-
-    estimated_files = len(cross_chunks)
-    print(f"{estimated_files} user chunks will be processed")
-
-    elapsed = time() - start_time
-
-    print("\nAll user batches proccessed.")
-    print(f"Time taken to save all files: {elapsed:.2f} seconds")
-    print(f"max_chunks={max_files} (currently unused in this mode)")
+    elapsed = time.time() - start_time
+    print(f"\nAll chunks processed. Total user-item pairs: {total_pairs}")
+    print(f"Total time: {elapsed:.2f} seconds")
+    print(f"Average time per pair: {elapsed / total_pairs:.6f} seconds")
