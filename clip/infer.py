@@ -59,18 +59,18 @@ if __name__ == "__main__":
     TOP_N = 200
 
     project_root = Path().resolve()
-    os.makedirs(project_root / "movie" / "result", exist_ok=True)
+    os.makedirs(project_root / "clip" / "result", exist_ok=True)
 
     user_data_path = project_root / "month_mytv_info.parquet"
-    movie_data_path = project_root / "mytv_vmp_content"
+    clip_data_path = project_root / "mytv_vmp_content"
     tags_path = project_root / "tags"
     rule_info_path = project_root / "rule_info.parquet"
 
-    result_json_path = project_root / "movie/result/result.json"
-    rulename_json_path = project_root / "movie/result/rulename.json"
-    rule_content_path = project_root / "movie/result/rule_content.txt"
+    result_json_path = project_root / "clip/result/result.json"
+    rulename_json_path = project_root / "clip/result/rulename.json"
+    rule_content_path = project_root / "clip/result/rule_content.txt"
 
-    checkpoint_path = "model/movie/best_model.pth"
+    checkpoint_path = "model/clip/best_model.pth"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     checkpoint = torch.load(checkpoint_path, map_location=device)
     input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     model.load_state_dict(checkpoint["model_state_dict"])
 
     print("Loading content metadata...")
-    clip_df = process_clip_item(movie_data_path, None, num_clip=-1, mode='infer')
+    clip_df = process_clip_item(clip_data_path, None, num_clip=-1, mode='infer')
     clip_df['content_id'] = clip_df['content_id'].astype(str)
 
     required_columns = ['content_id', 'content_name', 'tag_names', 'type_id']
@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     print("Starting inference loop...")
     chunks = process_infer_data(
-        user_data_path, movie_data_path,
+        user_data_path, clip_data_path,
         num_user=-1, num_clip=-1,
         user_batch_size=50
     )
