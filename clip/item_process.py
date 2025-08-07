@@ -105,7 +105,7 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
                    #"locked_level", 
                    "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
-    cont_cols = ["content_publish_year", "content_duration"]
+    cont_cols = ["content_publish_year"]
 
     # Train mode: fit and save encoder
     if mode == 'train':
