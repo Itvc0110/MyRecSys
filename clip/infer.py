@@ -6,60 +6,7 @@ from tqdm import tqdm
 import json
 import time
 from pathlib import Path
-
-from processing import process_infer_data
-from torch.utils.data import DataLoader, TensorDataset
-from dcnv3 import DCNv3
-from rule_process import get_rulename
-
-
-def rank_result(data, n):
-    reordered_data = {}
-    for user_id in data:
-        user_scores = []
-        for content_id, content in data[user_id]['suggested_content'].items():
-            user_scores.append({
-                'content_id': content_id,
-                'content_name': content['content_name'],
-                'tag_names': content['tag_names'],
-                'type_id': content['type_id'],
-                'score': content['score']
-            })
-        sorted_user_scores = sorted(user_scores, key=lambda x: x['score'], reverse=True)[:n]
-        reordered_data[user_id] = {
-            'suggested_content': {
-                film['content_id']: {
-                    'content_name': film['content_name'],
-                    'tag_names': film['tag_names'],
-                    'type_id': film['type_id'],
-                    'score': film['score']
-                } for film in sorted_user_scores
-            },
-            'user': data[user_id]['user']
-        }
-    return reordered_data
-
-
-def infer(model, data, device):
-    model.eval()
-    predictions = []
-    with torch.no_grad():
-        for batch in tqdm(data, desc="Inference", leave=False):
-            inputs = batch[0].to(device)
-            outputs = model(inputs)
-            predictions.extend(outputs['y_pred'].detach().cpu().numpy())
-            torch.cuda.empty_cache()
-    return predictions
-
-
-import os
-import pandas as pd
-import polars as pl
-import torch
-from tqdm import tqdm
-import json
-import time
-from pathlib import Path
+from glob import glob
 
 from torch.utils.data import DataLoader, TensorDataset
 from processing import process_infer_data
@@ -99,7 +46,7 @@ def infer(model, data, device):
     model.eval()
     predictions = []
     with torch.no_grad():
-        for batch in tqdm(data, desc="Inference", leave=False):
+        for batch in tqdm(data, desc="Inference"):
             inputs = batch[0].to(device)
             outputs = model(inputs)
             predictions.extend(outputs['y_pred'].detach().cpu().numpy())
@@ -112,48 +59,45 @@ if __name__ == "__main__":
     TOP_N = 200
 
     project_root = Path().resolve()
-    os.makedirs(project_root / "clip" / "result", exist_ok=True)
-    os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
+    os.makedirs(project_root / "movie" / "result", exist_ok=True)
 
     user_data_path = project_root / "month_mytv_info.parquet"
-    clip_data_path = project_root / "mytv_vmp_content"
+    movie_data_path = project_root / "mytv_vmp_content"
     tags_path = project_root / "tags"
     rule_info_path = project_root / "rule_info.parquet"
 
-    result_dir = project_root / "clip/result"
+    result_json_path = project_root / "movie/result/result.json"
+    rulename_json_path = project_root / "movie/result/rulename.json"
+    rule_content_path = project_root / "movie/result/rule_content.txt"
 
-    print("Loading model...")
-    checkpoint_path = "model/clip/best_model.pth"
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint_path = "model/movie/best_model.pth"
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    checkpoint = torch.load(checkpoint_path, map_location=device)
     input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
 
-    model = DCNv3(input_dim)
+    model = DCNv3(input_dim).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
 
-    print("Loading content clip metadata...")
-    clip_df = process_clip_item(clip_data_path, "clip/infer_data", num_clip=-1, mode='infer')
-    content_unique = (
-        clip_df.drop_duplicates(subset=['content_id'])
-        .loc[:, ['content_id', 'content_name', 'tag_names', 'type_id']]
-    )
+    print("Loading content metadata...")
+    clip_df = process_clip_item(movie_data_path, None, num_clip=-1, mode='infer')
+    clip_df['content_id'] = clip_df['content_id'].astype(str)
+
+    required_columns = ['content_id', 'content_name', 'tag_names', 'type_id']
+    content_unique = clip_df[required_columns].drop_duplicates(subset=['content_id'])
     content_dict = {
         row['content_id']: (row['content_name'], row['tag_names'], row['type_id'])
         for _, row in content_unique.iterrows()
     }
 
-    print("Generating user-clip cross joins in memory...")
+    print("Starting inference loop...")
     chunks = process_infer_data(
-        user_data_path, clip_data_path,
-        num_user=80, num_clip=-1,
-        user_batch_size=10
+        user_data_path, movie_data_path,
+        num_user=-1, num_clip=-1,
+        user_batch_size=50
     )
 
     total_pairs = 0
-    merged_result = {}
-    merged_rulename = []
-    merged_rule_content = ""
+    result_dict = {}
 
     for idx, df in enumerate(chunks, 1):
         print(f"\n[Chunk {idx}] Processing {len(df)} rows...")
@@ -172,7 +116,6 @@ if __name__ == "__main__":
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
 
-        result_dict = {}
         for pid, user, cid, score in zip(
             interaction_df['profile_id'],
             interaction_df['username'],
@@ -189,47 +132,41 @@ if __name__ == "__main__":
             }
             result_dict[pid]['user'] = {'username': user, 'profile_id': pid}
 
-        for pid, pdata in result_dict.items():
-            for cid, cdata in pdata['suggested_content'].items():
-                meta = content_dict.get(cid)
-                if meta:
-                    cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
+    print("\nAdding metadata to content...")
+    for pid, pdata in result_dict.items():
+        for cid, cdata in pdata['suggested_content'].items():
+            meta = content_dict.get(cid)
+            if meta:
+                cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
 
-        ranked = rank_result(result_dict, TOP_N)
-        ruled = get_rulename(ranked, rule_info_path, tags_path)
+    print("\nRanking results...")
+    ranked = rank_result(result_dict, TOP_N)
 
-        for pid, info in ruled.items():
-            merged_result[pid] = info
+    print("\nApplying rules...")
+    ruled = get_rulename(ranked, rule_info_path, tags_path)
 
-            rulename_json_file = {'pid': pid, 'd': {}}
-            rule_content = str(pid) + '|'
+    homepage_rule = []
+    rule_content = ""
+    for pid, info in ruled.items():
+        rulename_json_file = {'pid': pid, 'd': {}}
+        rule_content += str(pid) + '|'
+        for cid, content in info['suggested_content'].items():
+            if content['rule_id'] != -100:
+                rulename_json_file['d'].setdefault(str(content['rule_id']), {})[cid] = content['type_id']
+        for rule, content_ids in rulename_json_file['d'].items():
+            rule_content += str(rule) + ',' + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
+        rule_content = rule_content.rstrip(';') + '\n'
+        rulename_json_file['d'] = ','.join(rulename_json_file['d'])
+        homepage_rule.append(rulename_json_file)
 
-            for cid, content in info['suggested_content'].items():
-                if content['rule_id'] != -100:
-                    rulename_json_file['d'].setdefault(str(content['rule_id']), {})[cid] = content['type_id']
-
-            for rule, content_ids in rulename_json_file['d'].items():
-                rule_content += str(rule) + ',' + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
-
-            rule_content = rule_content.rstrip(';') + '\n'
-            rulename_json_file['d'] = ','.join(rulename_json_file['d'])
-            merged_rulename.append(rulename_json_file)
-            merged_rule_content += rule_content
-
-        print(f"  ↪ Finished chunk {idx}")
-
-    with open(result_dir / "result.json", "w", encoding="utf-8") as f:
-        json.dump(merged_result, f, indent=4, ensure_ascii=False)
-
-    with open(result_dir / "rulename.json", "w", encoding="utf-8") as f:
-        json.dump(merged_rulename, f, indent=4, ensure_ascii=False)
-
-    with open(result_dir / "rule_content.txt", "w", encoding="utf-8") as f:
-        f.write(merged_rule_content)
-
-    print("\u2705 Merged output saved.")
+    with open(result_json_path, 'w', encoding='utf-8') as f:
+        json.dump(ruled, f, indent=4, ensure_ascii=False)
+    with open(rulename_json_path, 'w', encoding='utf-8') as f:
+        json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
+    with open(rule_content_path, 'w', encoding='utf-8') as f:
+        f.write(rule_content)
 
     elapsed = time.time() - start_time
-    print(f"\nElapsed time: {elapsed:.2f} seconds")
-    print(f"Total user-item pairs: {total_pairs}")
+    print(f"\n✅ Inference pipeline completed in {elapsed:.2f}s")
+    print(f"Total user-item pairs: {total_pairs:,}")
     print(f"Average time per pair: {elapsed / total_pairs:.6f} seconds")
