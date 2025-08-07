@@ -29,7 +29,7 @@ def merge_content_movies(movie_data_path, output_file):
     df.to_parquet(output_file, index=False)
     return df
 
-def fit_item_encoder(data, single_cols, mlb_col, cont_cols):
+def fit_item_encoder(data, single_cols, mlb_col): #cont_cols
     ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
     ohe.fit(data[single_cols])
     joblib.dump(ohe, Path("model/movie/encoder/item_ohe_single.joblib"))
@@ -39,11 +39,11 @@ def fit_item_encoder(data, single_cols, mlb_col, cont_cols):
     mlb.fit(lists)
     joblib.dump(mlb, Path("model/movie/encoder/item_mlb_cate.joblib"))
 
-    scaler = StandardScaler()
-    scaler.fit(data[cont_cols])
-    joblib.dump(scaler, Path("model/movie/encoder/item_scaler.joblib"))
+    #scaler = StandardScaler()
+    #scaler.fit(data[cont_cols])
+    #joblib.dump(scaler, Path("model/movie/encoder/item_scaler.joblib"))
 
-def transform_item_data(data, single_cols, mlb_col, cont_cols):
+def transform_item_data(data, single_cols, mlb_col): #cont_cols
     ohe = joblib.load(Path("model/movie/encoder/item_ohe_single.joblib"))
     mlb = joblib.load(Path("model/movie/encoder/item_mlb_cate.joblib"))
     scaler = joblib.load(ENC_DIR / "item_scaler.joblib")
@@ -55,11 +55,13 @@ def transform_item_data(data, single_cols, mlb_col, cont_cols):
     mlb_arr = mlb.transform(mlb_lists)
     mlb_df = pd.DataFrame(mlb_arr, columns=[f"content_cate_id_{c}" for c in mlb.classes_], index=data.index)
 
-    scaled_arr = scaler.transform(data[cont_cols])
-    scaled_df = pd.DataFrame(scaled_arr, columns=cont_cols, index=data.index)
+    #scaled_arr = scaler.transform(data[cont_cols])
+    #scaled_df = pd.DataFrame(scaled_arr, columns=cont_cols, index=data.index)
 
-    data = data.drop(single_cols + [mlb_col] + cont_cols, axis=1)
-    return pd.concat([data, ohe_df, mlb_df, scaled_df], axis=1)
+    data = data.drop(single_cols + [mlb_col] #+ cont_cols
+                     , axis=1)
+    return pd.concat([data, ohe_df, mlb_df#, scaled_df
+                      ], axis=1)
 
 def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     # Load or merge raw movie data
@@ -106,14 +108,16 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
                     #"locked_level", 
                    "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
-    cont_cols = ["content_publish_year", "content_duration"]
+    #cont_cols = ["content_publish_year", "content_duration"]
 
     # Train mode: fit and save encoder
     if mode == 'train':
-        fit_item_encoder(movie_df, single_cols, mlb_col, cont_cols)
+        fit_item_encoder(movie_df, single_cols, mlb_col#, cont_cols
+                         )
 
     # Transform with saved encoder
-    movie_df = transform_item_data(movie_df, single_cols, mlb_col, cont_cols)
+    movie_df = transform_item_data(movie_df, single_cols, mlb_col#, cont_cols
+                                   )
 
     # Slice movie data if needed
     if num_movie != -1:

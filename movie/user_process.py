@@ -16,13 +16,13 @@ def fit_user_encoder(user_data, cat_cols):
     joblib.dump(user_ohe, enc_path)  
     return user_ohe
 
-def fit_user_scaler(user_data, cont_cols):
-    user_scaler = StandardScaler()
-    user_scaler.fit(user_data[cont_cols])
+#def fit_user_scaler(user_data, cont_cols):
+#    user_scaler = StandardScaler()
+#    user_scaler.fit(user_data[cont_cols])
 
-    scaler_path = os.path.join(ENC_DIR, "user_scaler.joblib")
-    joblib.dump(user_scaler, scaler_path)
-    return user_scaler
+#    scaler_path = os.path.join(ENC_DIR, "user_scaler.joblib")
+#    joblib.dump(user_scaler, scaler_path)
+#    return user_scaler
 
 def transform_user_data(user_data, cat_cols, cont_cols):
     enc_path = os.path.join(ENC_DIR, "user_ohe.joblib")
@@ -62,7 +62,7 @@ def process_user_data(data_path, output_dir, num_user=-1, mode='train'):
 
     if mode == 'train':
         fit_user_encoder(user_data, cat_cols)
-        fit_user_scaler(user_data, cont_cols)
+        #fit_user_scaler(user_data, cont_cols)
         
     user_data = transform_user_data(user_data, cat_cols, cont_cols)
 
