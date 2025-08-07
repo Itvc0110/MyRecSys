@@ -92,7 +92,7 @@ def process_data(output_filepath):
         combined_df['content_duration'] = combined_df['content_duration'].astype(float)
         combined_df['duration'] = combined_df['duration'].astype(float)
         combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
-        combined_df['label'] = (combined_df['percent_duration'] > 0.5).astype(int)
+        combined_df['label'] = (combined_df['percent_duration'] > 0.1).astype(int)
         combined_df = combined_df.drop(columns=['percent_duration', 'duration'], inplace=False)
         combined_df['content_duration'] = np.log(combined_df['content_duration'])
 
@@ -102,7 +102,6 @@ def process_data(output_filepath):
         return
 
 
-    
 def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, output_dir_path,
                        user_batch_size=20, chunk_size=None, max_files=-1):
     start_time = time()
