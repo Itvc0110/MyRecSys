@@ -24,7 +24,7 @@ def fit_user_encoder(user_data, cat_cols):
 #    joblib.dump(user_scaler, scaler_path)
 #    return user_scaler
 
-def transform_user_data(user_data, cat_cols, cont_cols):
+def transform_user_data(user_data, cat_cols): #cont_cols
     enc_path = os.path.join(ENC_DIR, "user_ohe.joblib")
     if not os.path.exists(enc_path):
         raise FileNotFoundError(f"Missing encoder at: {enc_path}")
@@ -38,11 +38,13 @@ def transform_user_data(user_data, cat_cols, cont_cols):
     if not os.path.exists(scaler_path):
         raise FileNotFoundError(f"Missing scaler at: {scaler_path}")
     user_scaler = joblib.load(scaler_path)
-    scaled_arr = user_scaler.transform(user_data[cont_cols])
-    scaled_df = pd.DataFrame(scaled_arr, columns=cont_cols, index=user_data.index)
+    #scaled_arr = user_scaler.transform(user_data[cont_cols])
+    #scaled_df = pd.DataFrame(scaled_arr, columns=cont_cols, index=user_data.index)
 
-    user_data = user_data.drop(columns=cont_cols + cat_cols)
-    return pd.concat([user_data, ohe_df, scaled_df], axis=1)
+    user_data = user_data.drop(columns=cat_cols #+ cont_cols
+                               )
+    return pd.concat([user_data, ohe_df#, scaled_df
+                      ], axis=1)
 
 
 def process_user_data(data_path, output_dir, num_user=-1, mode='train'):
@@ -58,13 +60,14 @@ def process_user_data(data_path, output_dir, num_user=-1, mode='train'):
 
     cat_cols = [#"province",
                 "package_code"]
-    cont_cols = ["birthday"]
+    #cont_cols = ["birthday"]
 
     if mode == 'train':
         fit_user_encoder(user_data, cat_cols)
         #fit_user_scaler(user_data, cont_cols)
         
-    user_data = transform_user_data(user_data, cat_cols, cont_cols)
+    user_data = transform_user_data(user_data, cat_cols#, cont_cols
+                                    )
 
     if num_user != -1:
         user_data = user_data.head(num_user)
