@@ -56,40 +56,50 @@ if __name__ == "__main__":
     start_time = time.time()
     TOP_N = 200
 
+    # Setup paths
     project_root = Path().resolve()
     os.makedirs(project_root / "clip" / "result", exist_ok=True)
     os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
-    user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
-    clip_data_path = os.path.join(project_root, "mytv_vmp_content")
-    content_clip_path = os.path.join(project_root, "clip/infer_data/merged_content_clips.parquet")
-    tags_path = os.path.join(project_root, "tags")
-    rule_info_path = os.path.join(project_root, "rule_info.parquet")
+    user_data_path = project_root / "month_mytv_info.parquet"
+    clip_data_path = project_root / "mytv_vmp_content"
+    content_clip_path = project_root / "clip/infer_data/merged_content_clips.parquet"
+    tags_path = project_root / "tags"
+    rule_info_path = project_root / "rule_info.parquet"
 
-    result_json_path = os.path.join(project_root, "clip/result/result.json")
-    rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
-    rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
+    result_json_path = project_root / "clip/result/result.json"
+    rulename_json_path = project_root / "clip/result/rulename.json"
+    rule_content_path = project_root / "clip/result/rule_content.txt"
 
-    checkpoint_path = "model/movie/best_model.pth"
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
-    model = DCNv3(expected_input_dim).to(device)
+    # Load model
+    print("Loading model...")
+    checkpoint_path = "model/clip/best_model.pth"
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
+
+    model = DCNv3(input_dim)
     model.load_state_dict(checkpoint["model_state_dict"])
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
     result_dict = {}
+    total_pairs = 0
 
+    # Inference preparation
     print("Generating user-clip cross joins in memory...")
-    chunks = process_infer_data(user_data_path, clip_data_path,
-                                num_user=80, num_clip=-1,
-                                output_dir_path="clip/infer_data",
-                                user_batch_size=10,
-                                chunk_size=None,
-                                max_files=-1,
-                                return_chunks=True)
+    chunks = process_infer_data(
+        user_data_path, clip_data_path,
+        num_user=80, num_clip=-1,
+        output_dir_path="clip/infer_data",
+        user_batch_size=10,
+        chunk_size=None,
+        max_files=-1,
+        return_chunks=True
+    )
 
+    # Inference loop
     for idx, df in enumerate(chunks, 1):
-        print(f"[Inference {idx}/{len(chunks)}] Processing in-memory chunk with {len(df)} rows")
+        print(f"[Inference {idx}/{len(chunks)}] Processing {len(df)} rows")
 
         exclude = {'username', 'content_id', 'profile_id'}
         to_convert = [col for col in df.columns if col not in exclude]
@@ -121,7 +131,7 @@ if __name__ == "__main__":
             }
             result_dict[pid]['user'] = {'username': user, 'profile_id': pid}
 
-
+    # Postprocessing: enrich content info
     print("\nStarting ranking and rule assignment...")
     rank_start = time.time()
 
@@ -131,9 +141,8 @@ if __name__ == "__main__":
         .unique(subset=['content_id'])
         .select(['content_id', 'content_name', 'tag_names', 'type_id'])
     )
-
     content_dict = {
-        row[0]: (row[1], row[2], row[3]) 
+        row[0]: (row[1], row[2], row[3])
         for row in content_unique.iter_rows()
     }
 
@@ -143,40 +152,44 @@ if __name__ == "__main__":
             if meta:
                 cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
 
-    print("\nStarting parallel ranking...")
-    rank_start = time.time()
+    print("\nRanking top results...")
     reordered_result = rank_result(result_dict, TOP_N)
     print(f"Ranking completed in {time.time()-rank_start:.2f}s")
 
-    print("\nStarting parallel rule assignment...")
+    print("\nAssigning rules...")
     rule_start = time.time()
     result_with_rule = get_rulename(reordered_result, rule_info_path, tags_path)
     print(f"Rule assignment completed in {time.time()-rule_start:.2f}s")
 
-    print(f"Ranking & rule assignment completed in {time.time()-rank_start:.2f}s")
-
+    # Prepare output files
     homepage_rule = []
     rule_content = ""
+
     for pid, info in result_with_rule.items():
         rulename_json_file = {'pid': pid, 'd': {}}
         rule_content += str(pid) + '|'
-        for key, content in info['suggested_content'].items():
+
+        for cid, content in info['suggested_content'].items():
             if content['rule_id'] != -100:
-                rulename_json_file['d'].setdefault(str(content['rule_id']), {})[key] = content['type_id']
+                rulename_json_file['d'].setdefault(str(content['rule_id']), {})[cid] = content['type_id']
+
         for rule, content_ids in rulename_json_file['d'].items():
             rule_content += str(rule) + ',' + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
+
         rule_content = rule_content.rstrip(';') + '\n'
         rulename_json_file['d'] = ','.join(rulename_json_file['d'])
         homepage_rule.append(rulename_json_file)
 
+    # Write output files
     with open(result_json_path, 'w', encoding='utf-8') as f:
         json.dump(result_with_rule, f, indent=4, ensure_ascii=False)
     with open(rulename_json_path, 'w', encoding='utf-8') as f:
         json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
-    with open(rule_content_path, "w", encoding='utf-8') as f:
+    with open(rule_content_path, 'w', encoding='utf-8') as f:
         f.write(rule_content)
 
+    # Final logs
     elapsed_time = time.time() - start_time
-    print(f"Elapsed time: {elapsed_time:.4f} seconds")
+    print(f"\nElapsed time: {elapsed_time:.2f}s")
     print(f"Total user-item pairs: {total_pairs}")
     print(f"Average inference time per pair: {elapsed_time / total_pairs:.6f} seconds")
