@@ -93,8 +93,7 @@ if __name__ == "__main__":
         output_dir_path="clip/infer_data",
         user_batch_size=10,
         chunk_size=None,
-        max_files=-1,
-        return_chunks=True
+        max_files=-1
     )
 
     # Inference loop
