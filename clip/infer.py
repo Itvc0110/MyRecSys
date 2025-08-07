@@ -6,13 +6,12 @@ from tqdm import tqdm
 import json
 import time
 from pathlib import Path
-from glob import glob
 
-from concurrent.futures import ProcessPoolExecutor
 from processing import process_infer_data
 from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
 from rule_process import get_rulename
+
 
 def rank_result(data, n):
     reordered_data = {}
@@ -40,6 +39,7 @@ def rank_result(data, n):
         }
     return reordered_data
 
+
 def infer(model, data, device):
     model.eval()
     predictions = []
@@ -51,32 +51,35 @@ def infer(model, data, device):
             torch.cuda.empty_cache()
     return predictions
 
+
 if __name__ == "__main__":
     start_time = time.time()
     TOP_N = 200
+    result_dict = {}
+    homepage_rule = []
+    rule_content = ""
+    total_pairs = 0
 
     project_root = Path().resolve()
     os.makedirs(project_root / "clip" / "result", exist_ok=True)
-    os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
     user_data_path = project_root / "month_mytv_info.parquet"
     clip_data_path = project_root / "mytv_vmp_content"
     content_clip_path = project_root / "clip/infer_data/merged_content_clips.parquet"
     tags_path = project_root / "tags"
     rule_info_path = project_root / "rule_info.parquet"
-
     result_dir = project_root / "clip/result"
 
     print("Loading model...")
     checkpoint_path = "model/clip/best_model.pth"
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
-
     model = DCNv3(input_dim)
     model.load_state_dict(checkpoint["model_state_dict"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
+    print("Loading content clip metadata...")
     content_clip_pl = pl.read_parquet(content_clip_path)
     content_unique = (
         content_clip_pl
@@ -88,21 +91,15 @@ if __name__ == "__main__":
         for row in content_unique.iter_rows()
     }
 
-    print("Generating user-clip cross joins in memory...")
+    print("Running chunked inference...")
     chunks = process_infer_data(
         user_data_path, clip_data_path,
         num_user=80, num_clip=-1,
-        output_dir_path="clip/infer_data",
-        user_batch_size=10,
-        chunk_size=None,
-        max_files=-1
+        user_batch_size=10
     )
 
-    total_pairs = 0
-
     for idx, df in enumerate(chunks, 1):
-        print(f"\n[Chunk {idx}/{len(chunks)}] Processing {len(df)} rows...")
-
+        print(f"\n[Chunk {idx}] Rows: {len(df)}")
         exclude = {'username', 'content_id', 'profile_id'}
         to_convert = [col for col in df.columns if col not in exclude]
         df[to_convert] = df[to_convert].apply(pd.to_numeric, errors='coerce')
@@ -117,40 +114,35 @@ if __name__ == "__main__":
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
 
-        result_dict = {}
+        partial_result = {}
         for pid, user, cid, score in zip(
             interaction_df['profile_id'],
             interaction_df['username'],
             interaction_df['content_id'],
             predictions
         ):
-            result_dict.setdefault(pid, {})
-            result_dict[pid].setdefault('suggested_content', {})
-            result_dict[pid]['suggested_content'][cid] = {
+            partial_result.setdefault(pid, {})
+            partial_result[pid].setdefault('suggested_content', {})
+            partial_result[pid]['suggested_content'][cid] = {
                 'content_name': '',
                 'tag_names': '',
                 'type_id': '',
                 'score': float(score)
             }
-            result_dict[pid]['user'] = {'username': user, 'profile_id': pid}
+            partial_result[pid]['user'] = {'username': user, 'profile_id': pid}
 
-        for pid, pdata in result_dict.items():
+        for pid, pdata in partial_result.items():
             for cid, cdata in pdata['suggested_content'].items():
                 meta = content_dict.get(cid)
                 if meta:
                     cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
 
-        ranked = rank_result(result_dict, TOP_N)
+        ranked = rank_result(partial_result, TOP_N)
         ruled = get_rulename(ranked, rule_info_path, tags_path)
 
-        result_json_path = result_dir / f"result_chunk_{idx}.json"
-        rulename_json_path = result_dir / f"rulename_chunk_{idx}.json"
-        rule_content_path = result_dir / f"rule_content_chunk_{idx}.txt"
-
-        homepage_rule = []
-        rule_content = ""
-
         for pid, info in ruled.items():
+            result_dict[pid] = info
+
             rulename_json_file = {'pid': pid, 'd': {}}
             rule_content += str(pid) + '|'
 
@@ -165,59 +157,15 @@ if __name__ == "__main__":
             rulename_json_file['d'] = ','.join(rulename_json_file['d'])
             homepage_rule.append(rulename_json_file)
 
-        with open(result_json_path, 'w', encoding='utf-8') as f:
-            json.dump(ruled, f, indent=4, ensure_ascii=False)
-        with open(rulename_json_path, 'w', encoding='utf-8') as f:
-            json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
-        with open(rule_content_path, 'w', encoding='utf-8') as f:
-            f.write(rule_content)
-
-        print(f"  \u21aa Finished chunk {idx}: wrote result, rulename, rule_content")
-
-    print("\n\U0001F4E6 Merging all chunk outputs...")
-
-    merged_result = {}
-    merged_rulename = []
-    merged_rule_content = ""
-
-    chunk_files = sorted(result_dir.glob("result_chunk_*.json"))
-    for file in chunk_files:
-        with open(file, "r", encoding="utf-8") as f:
-            chunk_result = json.load(f)
-            merged_result.update(chunk_result)
-
-    chunk_rulename_files = sorted(result_dir.glob("rulename_chunk_*.json"))
-    for file in chunk_rulename_files:
-        with open(file, "r", encoding="utf-8") as f:
-            chunk_rulename = json.load(f)
-            merged_rulename.extend(chunk_rulename)
-
-    chunk_rule_content_files = sorted(result_dir.glob("rule_content_chunk_*.txt"))
-    for file in chunk_rule_content_files:
-        with open(file, "r", encoding="utf-8") as f:
-            merged_rule_content += f.read()
-
+    print("\nSaving final outputs...")
     with open(result_dir / "result.json", "w", encoding="utf-8") as f:
-        json.dump(merged_result, f, indent=4, ensure_ascii=False)
+        json.dump(result_dict, f, indent=4, ensure_ascii=False)
 
     with open(result_dir / "rulename.json", "w", encoding="utf-8") as f:
-        json.dump(merged_rulename, f, indent=4, ensure_ascii=False)
+        json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
 
     with open(result_dir / "rule_content.txt", "w", encoding="utf-8") as f:
-        f.write(merged_rule_content)
-
-    print("\u2705 Merged output saved.")
-
-    # Optional cleanup
-    # for file in result_dir.glob("result_chunk_*.json"):
-    #     file.unlink()
-    # for file in result_dir.glob("rulename_chunk_*.json"):
-    #     file.unlink()
-    # for file in result_dir.glob("rule_content_chunk_*.txt"):
-    #     file.unlink()
-    # print("\U0001F5D1️ Deleted intermediate chunk files.")
+        f.write(rule_content)
 
     elapsed = time.time() - start_time
-    print(f"\nElapsed time: {elapsed:.2f} seconds")
-    print(f"Total user-item pairs: {total_pairs}")
-    print(f"Average time per pair: {elapsed / total_pairs:.6f} seconds")
+    print(f"\n✅ Done. Total time: {elapsed:.2f}s | Total pairs: {total_pairs} | Avg/pair: {elapsed / total_pairs:.6f}s")
