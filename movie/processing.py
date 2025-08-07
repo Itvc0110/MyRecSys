@@ -92,7 +92,7 @@ def process_data(output_filepath):
         combined_df['content_duration'] = combined_df['content_duration'].astype(float)
         combined_df['duration'] = combined_df['duration'].astype(float)
         combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
-        combined_df['label'] = (combined_df['percent_duration'] > 0.3).astype(int)
+        combined_df['label'] = (combined_df['percent_duration'] > 0.5).astype(int)
         combined_df = combined_df.drop(columns=['percent_duration', 'duration'], inplace=False)
         combined_df['content_duration'] = np.log(combined_df['content_duration'])
 
