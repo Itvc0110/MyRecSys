@@ -40,11 +40,21 @@ def rank_result(data, n):
         }
     return reordered_data
 
+def infer(model, data, device):
+    model.eval()
+    predictions = []
+    with torch.no_grad():
+        for batch in tqdm(data, desc="Inference", leave=False):
+            inputs = batch[0].to(device)
+            outputs = model(inputs)
+            predictions.extend(outputs['y_pred'].detach().cpu().numpy())
+            torch.cuda.empty_cache()
+    return predictions
+
 if __name__ == "__main__":
     start_time = time.time()
     TOP_N = 200
 
-    # Paths
     project_root = Path().resolve()
     os.makedirs(project_root / "clip" / "result", exist_ok=True)
     os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
@@ -57,7 +67,6 @@ if __name__ == "__main__":
 
     result_dir = project_root / "clip/result"
 
-    # Load model
     print("Loading model...")
     checkpoint_path = "model/clip/best_model.pth"
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
@@ -68,7 +77,6 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    # Load content metadata once
     content_clip_pl = pl.read_parquet(content_clip_path)
     content_unique = (
         content_clip_pl
@@ -80,7 +88,6 @@ if __name__ == "__main__":
         for row in content_unique.iter_rows()
     }
 
-    # Generate chunks in memory
     print("Generating user-clip cross joins in memory...")
     chunks = process_infer_data(
         user_data_path, clip_data_path,
@@ -88,8 +95,7 @@ if __name__ == "__main__":
         output_dir_path="clip/infer_data",
         user_batch_size=10,
         chunk_size=None,
-        max_files=-1,
-        return_chunks=True
+        max_files=-1
     )
 
     total_pairs = 0
@@ -97,7 +103,6 @@ if __name__ == "__main__":
     for idx, df in enumerate(chunks, 1):
         print(f"\n[Chunk {idx}/{len(chunks)}] Processing {len(df)} rows...")
 
-        # Preprocess
         exclude = {'username', 'content_id', 'profile_id'}
         to_convert = [col for col in df.columns if col not in exclude]
         df[to_convert] = df[to_convert].apply(pd.to_numeric, errors='coerce')
@@ -109,11 +114,9 @@ if __name__ == "__main__":
         infer_tensor = torch.tensor(features.to_numpy(), dtype=torch.float32)
         infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
 
-        # Inference
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
 
-        # Build results for this chunk
         result_dict = {}
         for pid, user, cid, score in zip(
             interaction_df['profile_id'],
@@ -131,20 +134,15 @@ if __name__ == "__main__":
             }
             result_dict[pid]['user'] = {'username': user, 'profile_id': pid}
 
-        # Enrich with content metadata
         for pid, pdata in result_dict.items():
             for cid, cdata in pdata['suggested_content'].items():
                 meta = content_dict.get(cid)
                 if meta:
                     cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
 
-        # Rank
         ranked = rank_result(result_dict, TOP_N)
-
-        # Assign rules
         ruled = get_rulename(ranked, rule_info_path, tags_path)
 
-        # Write result files for this chunk
         result_json_path = result_dir / f"result_chunk_{idx}.json"
         rulename_json_path = result_dir / f"rulename_chunk_{idx}.json"
         rule_content_path = result_dir / f"rule_content_chunk_{idx}.txt"
@@ -174,10 +172,52 @@ if __name__ == "__main__":
         with open(rule_content_path, 'w', encoding='utf-8') as f:
             f.write(rule_content)
 
-        print(f"  ↪︎ Finished chunk {idx}: wrote result, rulename, rule_content")
+        print(f"  \u21aa Finished chunk {idx}: wrote result, rulename, rule_content")
+
+    print("\n\U0001F4E6 Merging all chunk outputs...")
+
+    merged_result = {}
+    merged_rulename = []
+    merged_rule_content = ""
+
+    chunk_files = sorted(result_dir.glob("result_chunk_*.json"))
+    for file in chunk_files:
+        with open(file, "r", encoding="utf-8") as f:
+            chunk_result = json.load(f)
+            merged_result.update(chunk_result)
+
+    chunk_rulename_files = sorted(result_dir.glob("rulename_chunk_*.json"))
+    for file in chunk_rulename_files:
+        with open(file, "r", encoding="utf-8") as f:
+            chunk_rulename = json.load(f)
+            merged_rulename.extend(chunk_rulename)
+
+    chunk_rule_content_files = sorted(result_dir.glob("rule_content_chunk_*.txt"))
+    for file in chunk_rule_content_files:
+        with open(file, "r", encoding="utf-8") as f:
+            merged_rule_content += f.read()
+
+    with open(result_dir / "result.json", "w", encoding="utf-8") as f:
+        json.dump(merged_result, f, indent=4, ensure_ascii=False)
+
+    with open(result_dir / "rulename.json", "w", encoding="utf-8") as f:
+        json.dump(merged_rulename, f, indent=4, ensure_ascii=False)
+
+    with open(result_dir / "rule_content.txt", "w", encoding="utf-8") as f:
+        f.write(merged_rule_content)
+
+    print("\u2705 Merged output saved.")
+
+    # Optional cleanup
+    # for file in result_dir.glob("result_chunk_*.json"):
+    #     file.unlink()
+    # for file in result_dir.glob("rulename_chunk_*.json"):
+    #     file.unlink()
+    # for file in result_dir.glob("rule_content_chunk_*.txt"):
+    #     file.unlink()
+    # print("\U0001F5D1️ Deleted intermediate chunk files.")
 
     elapsed = time.time() - start_time
-    print(f"\nAll chunks processed.")
+    print(f"\nElapsed time: {elapsed:.2f} seconds")
     print(f"Total user-item pairs: {total_pairs}")
-    print(f"Total time: {elapsed:.2f} seconds")
     print(f"Average time per pair: {elapsed / total_pairs:.6f} seconds")
