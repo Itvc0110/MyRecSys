@@ -154,7 +154,7 @@ if __name__ == "__main__":
         # Separate features & IDs in Polars
         exclude = {"username", "content_id", "profile_id"}
         to_convert = [col for col in cross_df.columns if col not in exclude]
-        cross_df = cross_df.cast({col: pl.Float32 for col in to_convert})
+        cross_df = cross_df.cast({col: pl.Float16 for col in to_convert})
 
         interaction_df = cross_df.select(["username", "content_id", "profile_id"]).to_pandas()
         features_np = cross_df.select(to_convert).to_numpy()
@@ -162,7 +162,7 @@ if __name__ == "__main__":
 
         # Inference
         infer_start = time.time()
-        infer_tensor = torch.tensor(features_np, dtype=torch.float32)
+        infer_tensor = torch.tensor(features_np, dtype=torch.float16)
         infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=4096, shuffle=False)
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
