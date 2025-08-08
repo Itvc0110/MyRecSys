@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
 from rule_process import get_rulename
 from user_process import process_user_data
-from item_process import process_movie_item
+from item_process import process_clip_item
 
 def rank_result(data, n):
     reordered_data = {}
@@ -57,20 +57,20 @@ if __name__ == "__main__":
     TOP_N = 200
 
     project_root = Path().resolve()
-    os.makedirs(project_root / "movie" / "result", exist_ok=True)
-    os.makedirs(project_root / "movie" / "infer_data", exist_ok=True)
+    os.makedirs(project_root / "clip" / "result", exist_ok=True)
+    os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
     # Define file paths
     user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
-    movie_data_path = os.path.join(project_root, "mytv_vmp_content")
-    processed_user_path = os.path.join(project_root, "movie/infer_data/user_data.parquet")
-    processed_item_path = os.path.join(project_root, "movie/infer_data/movie_item_data.parquet")
-    content_movie_path = os.path.join(project_root, "movie/infer_data/merged_content_movies.parquet")
+    clip_data_path = os.path.join(project_root, "mytv_vmp_content")
+    processed_user_path = os.path.join(project_root, "clip/infer_data/user_data.parquet")
+    processed_item_path = os.path.join(project_root, "clip/infer_data/clip_item_data.parquet")
+    content_clip_path = os.path.join(project_root, "clip/infer_data/merged_content_clips.parquet")
     tags_path = os.path.join(project_root, "tags")
     rule_info_path = os.path.join(project_root, "rule_info.parquet")
-    result_json_path = os.path.join(project_root, "movie/result/result.json")
-    rulename_json_path = os.path.join(project_root, "movie/result/rulename.json")
-    rule_content_path = os.path.join(project_root, "movie/result/rule_content.txt")
+    result_json_path = os.path.join(project_root, "clip/result/result.json")
+    rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
+    rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
     # Preprocess user and item data
     print("Preprocessing user and item data...")
@@ -80,7 +80,7 @@ if __name__ == "__main__":
         if not os.path.exists(processed_user_path):
             print("  ↪︎ Processing user data...")
             user_process_start = time.time()
-            process_user_data(user_data_path, output_dir="movie/infer_data", num_user=-1, mode='infer')
+            process_user_data(user_data_path, output_dir="clip/infer_data", num_user=-1, mode='infer')
             user_process_time = time.time() - user_process_start
             print(f"  ↪︎ User data processed in {user_process_time:.2f} seconds")
         else:
@@ -90,7 +90,7 @@ if __name__ == "__main__":
         if not os.path.exists(processed_item_path):
             print("  ↪︎ Processing item data...")
             item_process_start = time.time()
-            process_movie_item(movie_data_path, output_dir="movie/infer_data", num_movie=-1, mode='infer')
+            process_clip_item(clip_data_path, output_dir="clip/infer_data", num_clip=-1, mode='infer')
             item_process_time = time.time() - item_process_start
             print(f"  ↪︎ Item data processed in {item_process_time:.2f} seconds")
         else:
@@ -107,16 +107,16 @@ if __name__ == "__main__":
     load_start = time.time()
     try:
         user_df = pd.read_parquet(processed_user_path)
-        movie_df = pd.read_parquet(processed_item_path)
+        clip_df = pd.read_parquet(processed_item_path)
     except FileNotFoundError as e:
         print(f"Error: {e}")
         print("Preprocessing failed to generate required parquet files.")
         exit(1)
     
     # Load duration data for user-profile mappings
-    durations = glob.glob(os.path.join(project_root, "movie/merged_duration", "*.parquet"))
+    durations = glob.glob(os.path.join(project_root, "clip/merged_duration", "*.parquet"))
     if not durations:
-        print("Error: No duration data found in movie/merged_duration/")
+        print("Error: No duration data found in clip/merged_duration/")
         exit(1)
     user_profile_list = []
     for duration in durations:
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     print(f"Data loaded in {load_time:.2f} seconds")
 
     # Load model
-    checkpoint_path = "model/movie/best_model.pth"
+    checkpoint_path = "model/clip/best_model.pth"
     try:
         checkpoint = torch.load(checkpoint_path, map_location=device)
     except FileNotFoundError:
@@ -160,8 +160,8 @@ if __name__ == "__main__":
         # Perform cross join
         cross_start = time.time()
         user_chunk_pl = pl.from_pandas(user_chunk)
-        movie_pl = pl.from_pandas(movie_df)
-        cross_df = user_chunk_pl.join(movie_pl, how="cross")
+        clip_pl = pl.from_pandas(clip_df)
+        cross_df = user_chunk_pl.join(clip_pl, how="cross")
         cross_df_pd = cross_df.to_pandas()
         cross_time = time.time() - cross_start
         print(f"  ↪︎ Cross join: {cross_time:.2f} seconds")
@@ -224,12 +224,12 @@ if __name__ == "__main__":
     print("\nAdding content metadata...")
     meta_start = time.time()
     try:
-        content_movie_pl = pl.read_parquet(content_movie_path)
+        content_clip_pl = pl.read_parquet(content_clip_path)
     except FileNotFoundError:
-        print(f"Error: Content metadata not found at {content_movie_path}")
+        print(f"Error: Content metadata not found at {content_clip_path}")
         exit(1)
     content_unique = (
-        content_movie_pl
+        content_clip_pl
         .unique(subset=['content_id'])
         .select(['content_id', 'content_name', 'tag_names', 'type_id'])
     )
