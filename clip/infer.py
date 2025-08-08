@@ -18,9 +18,6 @@ from rule_process import get_rulename
 from user_process import process_user_data
 from item_process import process_clip_item
 
-# --------------------
-# Helper functions (kept from original)
-# --------------------
 def rank_result(data, n):
     reordered_data = {}
     for user_id in data:
@@ -58,9 +55,6 @@ def infer(model, data_loader, device):
         torch.cuda.empty_cache()
     return predictions
 
-# --------------------
-# Main
-# --------------------
 if __name__ == "__main__":
     start_time = time.time()
     TOP_N = 200
@@ -81,9 +75,7 @@ if __name__ == "__main__":
     rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
     rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
-    # --------------
     # Preprocess
-    # --------------
     print("Preprocessing user and item data...")
     preprocess_start = time.time()
     try:
@@ -102,9 +94,8 @@ if __name__ == "__main__":
         exit(1)
     print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
 
-    # --------------
+
     # Load data
-    # --------------
     print("\nLoading user and item data...")
     try:
         user_df = pd.read_parquet(processed_user_path)
@@ -131,9 +122,8 @@ if __name__ == "__main__":
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
     print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
 
-    # --------------
+
     # Load model once
-    # --------------
     checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
     try:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -145,9 +135,8 @@ if __name__ == "__main__":
     model = DCNv3(expected_input_dim).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    # --------------
+
     # Preload clip and content metadata once
-    # --------------
     clip_pl = pl.from_pandas(clip_df)
     total_contents = clip_pl.height
     print(f"\nTotal unique contents: {total_contents:,}")
@@ -166,14 +155,12 @@ if __name__ == "__main__":
     # content_dict: content_id -> (name, tag_names, type_id)
     content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
 
-    # --------------
+
     # Prepare pipeline utilities
-    # --------------
-    # profile_id -> username dict (O(1) lookup)
     profile_to_username = dict(zip(user_profile_df['profile_id'], user_profile_df['username']))
 
     # chunk control
-    user_batch_size = 10  # you can tune
+    user_batch_size = 30  
     num_users = len(user_profile_df)
     estimated_num_chunks = ceil(num_users / user_batch_size)
     print(f"\nProcessing {num_users} users in ~{estimated_num_chunks} chunks (batch size {user_batch_size})...")
@@ -184,10 +171,7 @@ if __name__ == "__main__":
     # We'll track the real number of produced chunk files (in case fallback per-user processing expands it)
     produced_chunks = 0
     total_pairs = 0
-
-    # --------------------
-    # Define the save worker
-    # --------------------
+    
     def process_and_save_chunk(chunk_idx, predictions, interaction_df):
         """Process predictions (list/array) and interaction_df (pandas) and save chunk files."""
         collect_start = time.time()
@@ -268,9 +252,7 @@ if __name__ == "__main__":
         del predictions, interaction_df, chunk_result, reordered_chunk, result_with_rule
         gc.collect()
 
-    # --------------------
     # Main pipelined loop
-    # --------------------
     prev_future = None
     chunk_id_counter = 0  # actual chunk index for filenames (1-based)
     try:
@@ -378,9 +360,7 @@ if __name__ == "__main__":
     produced_chunks = chunk_id_counter
     print(f"\nProduced {produced_chunks} chunk files. Starting post-step merge...")
 
-    # --------------------
     # Post-step: Merge per-chunk files into final outputs
-    # --------------------
     merge_start = time.time()
     final_result = {}
     final_rulename = []
