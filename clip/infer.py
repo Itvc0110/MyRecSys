@@ -171,7 +171,7 @@ if __name__ == "__main__":
     logger.info(f"Model loaded in {model_load_time:.2f} seconds\n")
 
     # Process users in chunks
-    user_batch_size = 50
+    user_batch_size = 20
     num_users = len(user_profile_df)
     num_chunks = ceil(num_users / user_batch_size)
     total_pairs = 0
