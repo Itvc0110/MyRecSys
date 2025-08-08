@@ -101,17 +101,17 @@ def process_data(output_filepath):
 
 # processing.py  -- replace the existing process_infer_data with this
 
-def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, output_dir_path,
+def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, output_dir_path,
                        user_batch_size=20, max_rows_warn_threshold=5_000_000):
     """
-    Preprocess user and movie data, save to two parquet files, and yield user chunks
-    together with full movie dataframe for on-the-fly inference.
+    Preprocess user and clip data, save to two parquet files, and yield user chunks
+    together with full clip dataframe for on-the-fly inference.
 
     Parameters:
       user_batch_size: number of user-profile rows to process per chunk
-      max_rows_warn_threshold: warn if chunk_size * n_movies exceeds this (protect memory)
+      max_rows_warn_threshold: warn if chunk_size * n_clips exceeds this (protect memory)
     Yields:
-      (chunk_idx (1-based), user_chunk_df (pandas), movie_df (pandas))
+      (chunk_idx (1-based), user_chunk_df (pandas), clip_df (pandas))
     """
     from time import time
     project_root = Path().resolve()
@@ -129,36 +129,36 @@ def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, out
 
     # 2) Item preprocessing
     t0 = time()
-    print("[process_infer_data] Loading & preprocessing movie item data...")
-    movie_df = process_movie_item(movie_data_path, output_dir_path, num_movie, mode='infer').head(num_movie)
-    movie_df['content_id'] = movie_df['content_id'].astype(str)
-    movie_elapsed = time() - t0
-    print(f"  ↪︎ Movie preprocess done: {len(movie_df)} rows ({movie_elapsed:.2f}s)")
+    print("[process_infer_data] Loading & preprocessing clip item data...")
+    clip_df = process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer').head(num_clip)
+    clip_df['content_id'] = clip_df['content_id'].astype(str)
+    clip_elapsed = time() - t0
+    print(f"  ↪︎ clip preprocess done: {len(clip_df)} rows ({clip_elapsed:.2f}s)")
 
     # 3) Save the two canonical files once
     user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
-    movie_item_path = os.path.join(output_dir, "movie_item_data.parquet")
+    clip_item_path = os.path.join(output_dir, "clip_item_data.parquet")
     user_df.to_parquet(user_profile_path, index=False)
-    movie_df.to_parquet(movie_item_path, index=False)
+    clip_df.to_parquet(clip_item_path, index=False)
     print(f"[process_infer_data] Saved user_profile to {user_profile_path}")
-    print(f"[process_infer_data] Saved movie_item to {movie_item_path}")
+    print(f"[process_infer_data] Saved clip_item to {clip_item_path}")
 
     total_users = len(user_df)
-    total_movies = len(movie_df)
-    est_total_pairs = total_users * total_movies
-    print(f"[process_infer_data] Total users: {total_users}, Total movies: {total_movies}, Estimated rows: {est_total_pairs:,}")
+    total_clips = len(clip_df)
+    est_total_pairs = total_users * total_clips
+    print(f"[process_infer_data] Total users: {total_users}, Total clips: {total_clips}, Estimated rows: {est_total_pairs:,}")
 
-    # Safety advice / warn if chunk × movies huge
-    est_per_chunk = user_batch_size * total_movies
+    # Safety advice / warn if chunk × clips huge
+    est_per_chunk = user_batch_size * total_clips
     if est_per_chunk > max_rows_warn_threshold:
-        print(f"WARNING: user_batch_size * total_movies = {est_per_chunk:,} > {max_rows_warn_threshold:,}.")
-        print("  → Reduce user_batch_size or consider splitting movies into sub-batches.")
+        print(f"WARNING: user_batch_size * total_clips = {est_per_chunk:,} > {max_rows_warn_threshold:,}.")
+        print("  → Reduce user_batch_size or consider splitting clips into sub-batches.")
 
     # 4) Yield chunks for on-the-fly processing
     chunk_idx = 0
     for start in range(0, total_users, user_batch_size):
         chunk_idx += 1
         user_chunk = user_df.iloc[start:start + user_batch_size].copy()
-        yield chunk_idx, user_chunk, movie_df
+        yield chunk_idx, user_chunk, clip_df
 
     print(f"[process_infer_data] Total preprocessing time: {time() - overall_start:.2f}s")

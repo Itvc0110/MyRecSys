@@ -62,22 +62,22 @@ if __name__ == "__main__":
     project_root = Path().resolve()
 
     # Prepare output folders
-    os.makedirs(project_root / "movie" / "result", exist_ok=True)
-    os.makedirs(project_root / "movie" / "infer_data", exist_ok=True)
+    os.makedirs(project_root / "clip" / "result", exist_ok=True)
+    os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
     # Paths
     user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
-    movie_data_path = os.path.join(project_root, "mytv_vmp_content")
-    content_movie_path = os.path.join(project_root, "movie/infer_data/merged_content_movies.parquet")
+    clip_data_path = os.path.join(project_root, "mytv_vmp_content")
+    content_clip_path = os.path.join(project_root, "clip/infer_data/merged_content_clips.parquet")
     tags_path = os.path.join(project_root, "tags")
     rule_info_path = os.path.join(project_root, "rule_info.parquet")
 
-    result_json_path = os.path.join(project_root, "movie/result/result.json")
-    rulename_json_path = os.path.join(project_root, "movie/result/rulename.json")
-    rule_content_path = os.path.join(project_root, "movie/result/rule_content.txt")
+    result_json_path = os.path.join(project_root, "clip/result/result.json")
+    rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
+    rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
     # Load model
-    checkpoint_path = "model/movie/best_model.pth"
+    checkpoint_path = "model/clip/best_model.pth"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     checkpoint = torch.load(checkpoint_path, map_location=device)
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
@@ -89,24 +89,24 @@ if __name__ == "__main__":
     total_pairs = 0
 
     # Optionally load content metadata early for mapping after inference
-    # (this uses the merged content file saved by process_movie_item)
+    # (this uses the merged content file saved by process_clip_item)
     try:
-        content_movie_pl = pl.read_parquet(content_movie_path)
+        content_clip_pl = pl.read_parquet(content_clip_path)
         content_unique = (
-            content_movie_pl
+            content_clip_pl
             .unique(subset=['content_id'])
             .select(['content_id', 'content_name', 'tag_names', 'type_id'])
         )
         content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
-        print(f"[Info] Loaded {len(content_dict)} unique content metadata entries from {content_movie_path}")
+        print(f"[Info] Loaded {len(content_dict)} unique content metadata entries from {content_clip_path}")
     except Exception as e:
-        print(f"[Warning] Could not load content metadata ({content_movie_path}): {e}")
+        print(f"[Warning] Could not load content metadata ({content_clip_path}): {e}")
         content_dict = {}
 
     # --- On-the-fly pipeline ---
-    for chunk_idx, user_chunk, movie_df in process_infer_data(user_data_path, movie_data_path,
-                                                              num_user=-1, num_movie=-1,
-                                                              output_dir_path="movie/infer_data",
+    for chunk_idx, user_chunk, clip_df in process_infer_data(user_data_path, clip_data_path,
+                                                              num_user=-1, num_clip=-1,
+                                                              output_dir_path="clip/infer_data",
                                                               user_batch_size=10):
 
         chunk_start = time.time()
@@ -114,7 +114,7 @@ if __name__ == "__main__":
 
         # Cross join (polars) -> pandas
         t0 = time.time()
-        cross_pl = pl.from_pandas(user_chunk).join(pl.from_pandas(movie_df), how="cross")
+        cross_pl = pl.from_pandas(user_chunk).join(pl.from_pandas(clip_df), how="cross")
         cross_df = cross_pl.fill_null(0).to_pandas()
         cross_elapsed = time.time() - t0
         print(f"  ↪︎ Cross join: {len(cross_df)} rows in {cross_elapsed:.2f}s")
