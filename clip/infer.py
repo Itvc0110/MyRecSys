@@ -305,7 +305,7 @@ if __name__ == "__main__":
                     infer_start = time.time()
                     if features_np.size > 0:
                         infer_tensor = torch.tensor(features_np, dtype=torch.float32)
-                        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
+                        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=32768, shuffle=False)
                         predictions = infer(model, infer_loader, device)
                     else:
                         predictions = []
@@ -330,7 +330,7 @@ if __name__ == "__main__":
             infer_start = time.time()
             if features_np.size > 0:
                 infer_tensor = torch.tensor(features_np, dtype=torch.float32)
-                infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
+                infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=32768, shuffle=False)
                 predictions = infer(model, infer_loader, device)
             else:
                 predictions = []
