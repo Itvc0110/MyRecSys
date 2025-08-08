@@ -161,7 +161,7 @@ if __name__ == "__main__":
         # Inference
         infer_start = time.time()
         infer_tensor = torch.tensor(features_np, dtype=torch.float32)
-        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
+        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=8192, shuffle=False)
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
         print(f"  ↪︎ Inference: {time.time()-infer_start:.2f} seconds")
