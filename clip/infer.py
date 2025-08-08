@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
 from rule_process import get_rulename
 from user_process import process_user_data
-from item_process import process_clip_item
+from item_process import process_clip_item, process_movie_item
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -57,7 +57,7 @@ def infer(model, data, device):
             torch.cuda.empty_cache()
     return predictions
 
-def save_chunk_results(temp_dict, result_file, rule_content_file, homepage_rule, content_dict, rule_info_path, tags_path):
+def save_chunk_results(temp_dict, result_file, rule_content_file, homepage_rule, content_dict, rule_info_path, tags_path, top_n):
     # Apply metadata and rules for the chunk
     chunk_result = {}
     for pid, data in temp_dict.items():
@@ -68,7 +68,7 @@ def save_chunk_results(temp_dict, result_file, rule_content_file, homepage_rule,
         chunk_result[pid] = data
 
     # Rank and apply rules
-    reordered_chunk = rank_result(chunk_result, TOP_N)
+    reordered_chunk = rank_result(chunk_result, top_n)
     result_with_rule = get_rulename(reordered_chunk, rule_info_path, tags_path)
 
     # Append to result.jsonl
@@ -95,23 +95,27 @@ def save_chunk_results(temp_dict, result_file, rule_content_file, homepage_rule,
 if __name__ == "__main__":
     start_time = time.time()
     TOP_N = 200
+    CONTENT_TYPE = "clip"  # Set to "movie" for movie data
 
     project_root = Path("/kaggle/working/MyRecSys/clip").resolve()
-    os.makedirs(project_root / "clip" / "result", exist_ok=True)
-    os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
+    content_dir = CONTENT_TYPE
+    os.makedirs(project_root / content_dir / "result", exist_ok=True)
+    os.makedirs(project_root / content_dir / "infer_data", exist_ok=True)
 
     # Define file paths
     user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
-    clip_data_path = os.path.join(project_root, "mytv_vmp_content")
-    processed_user_path = os.path.join(project_root, "clip/infer_data/user_data.parquet")
-    processed_item_path = os.path.join(project_root, "clip/infer_data/clip_item_data.parquet")
-    content_clip_path = os.path.join(project_root, "clip/infer_data/merged_content_clips.parquet")
+    item_data_path = os.path.join(project_root, "mytv_vmp_content")
+    processed_user_path = os.path.join(project_root, f"{content_dir}/infer_data/user_data.parquet")
+    processed_item_path = os.path.join(project_root, f"{content_dir}/infer_data/{content_dir}_item_data.parquet")
+    content_path = os.path.join(project_root, f"{content_dir}/infer_data/merged_content_{content_dir}s.parquet")
     tags_path = os.path.join(project_root, "tags")
     rule_info_path = os.path.join(project_root, "rule_info.parquet")
-    result_json_path = os.path.join(project_root, "clip/result/result.json")
-    result_jsonl_path = os.path.join(project_root, "clip/result/result.jsonl")
-    rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
-    rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
+    result_json_path = os.path.join(project_root, f"{content_dir}/result/result.json")
+    result_jsonl_path = os.path.join(project_root, f"{content_dir}/result/result.jsonl")
+    rulename_json_path = os.path.join(project_root, f"{content_dir}/result/rulename.json")
+    rule_content_path = os.path.join(project_root, f"{content_dir}/result/rule_content.txt")
+    duration_dir = os.path.join(project_root, f"{content_dir}/merged_duration")
+    model_path = os.path.join(project_root, f"model/{content_dir}/best_model.pth")
 
     # Preprocess user and item data
     logger.info("=== Preprocessing User and Item Data ===")
@@ -120,7 +124,7 @@ if __name__ == "__main__":
         if not os.path.exists(processed_user_path):
             logger.info("  Processing user data...")
             user_process_start = time.time()
-            process_user_data(user_data_path, output_dir="clip/infer_data", num_user=-1, mode='infer')
+            process_user_data(user_data_path, output_dir=f"{content_dir}/infer_data", num_user=-1, mode='infer')
             user_process_time = time.time() - user_process_start
             logger.info(f"  User data processed in {user_process_time:.2f} seconds")
         else:
@@ -129,7 +133,8 @@ if __name__ == "__main__":
         if not os.path.exists(processed_item_path):
             logger.info("  Processing item data...")
             item_process_start = time.time()
-            process_clip_item(clip_data_path, output_dir="clip/infer_data", num_clip=-1, mode='infer')
+            process_item = process_clip_item if CONTENT_TYPE == "clip" else process_movie_item
+            process_item(item_data_path, output_dir=f"{content_dir}/infer_data", num_clip=-1 if CONTENT_TYPE == "clip" else -1, mode='infer')
             item_process_time = time.time() - item_process_start
             logger.info(f"  Item data processed in {item_process_time:.2f} seconds")
         else:
@@ -146,13 +151,12 @@ if __name__ == "__main__":
     load_start = time.time()
     try:
         user_df = pd.read_parquet(processed_user_path)
-        clip_df = pd.read_parquet(processed_item_path)
+        item_df = pd.read_parquet(processed_item_path)
     except FileNotFoundError as e:
         logger.error(f"Error: {e}")
         logger.error("Preprocessing failed to generate required parquet files.")
         exit(1)
 
-    duration_dir = os.path.join(project_root, "clip/merged_duration")
     if not os.path.exists(duration_dir):
         logger.error(f"Error: Duration directory not found at {duration_dir}")
         logger.error("Run merge_parquet_files from duration_process.py to generate duration files.")
@@ -170,18 +174,20 @@ if __name__ == "__main__":
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
     load_time = time.time() - load_start
     logger.info(f"Data loaded in {load_time:.2f} seconds")
-    logger.info(f"Loaded {len(user_profile_df)} users and {len(clip_df)} items\n")
+    logger.info(f"Loaded {len(user_profile_df)} users and {len(item_df)} items")
+    logger.info(f"Unique profile_ids: {user_profile_df['profile_id'].nunique()}")
+    logger.info(f"Unique items in item_df: {item_df['content_id'].nunique()}\n")
 
     # Load content metadata
     logger.info("=== Loading Content Metadata ===")
     meta_load_start = time.time()
     try:
-        content_clip_pl = pl.read_parquet(content_clip_path)
+        content_pl = pl.read_parquet(content_path)
     except FileNotFoundError:
-        logger.error(f"Error: Content metadata not found at {content_clip_path}")
+        logger.error(f"Error: Content metadata not found at {content_path}")
         exit(1)
     content_unique = (
-        content_clip_pl
+        content_pl
         .unique(subset=['content_id'])
         .select(['content_id', 'content_name', 'tag_names', 'type_id'])
     )
@@ -192,12 +198,11 @@ if __name__ == "__main__":
     # Load model
     logger.info("=== Loading Model ===")
     model_load_start = time.time()
-    checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
     try:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        checkpoint = torch.load(model_path, map_location=device)
     except FileNotFoundError:
-        logger.error(f"Error: Model checkpoint not found at {checkpoint_path}")
+        logger.error(f"Error: Model checkpoint not found at {model_path}")
         exit(1)
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
     model = DCNv3(expected_input_dim).to(device)
@@ -235,8 +240,8 @@ if __name__ == "__main__":
         # Perform cross join
         cross_start = time.time()
         user_chunk_pl = pl.from_pandas(user_chunk)
-        clip_pl = pl.from_pandas(clip_df)
-        cross_df = user_chunk_pl.join(clip_pl, how="cross")
+        item_pl = pl.from_pandas(item_df)
+        cross_df = user_chunk_pl.join(item_pl, how="cross")
         cross_df_pd = cross_df.to_pandas()
         cross_time = time.time() - cross_start
         logger.info(f"  Cross join: {cross_time:.2f} seconds ({len(cross_df)} pairs)")
@@ -302,24 +307,36 @@ if __name__ == "__main__":
 
         # Save chunk results to final files
         save_start = time.time()
-        save_chunk_results(result_dict, result_jsonl_path, rule_content_path, homepage_rule, content_dict, rule_info_path, tags_path)
+        save_chunk_results(result_dict, result_jsonl_path, rule_content_path, homepage_rule, content_dict, rule_info_path, tags_path, TOP_N)
         save_time = time.time() - save_start
         logger.info(f"  Save chunk results: {save_time:.2f} seconds")
 
+        # Log memory usage
+        import psutil
+        logger.info(f"  Memory usage: {psutil.virtual_memory().percent}%\n")
         chunk_time = time.time() - chunk_start
         chunk_times.append(chunk_time)
         logger.info(f"  Total chunk time: {chunk_time:.2f} seconds | Pairs: {len(predictions):,}\n")
 
-    # Convert result.jsonl to result.json
+    # Convert result.jsonl to result.json in batches
     logger.info("=== Converting Result JSONL to JSON ===")
     convert_start = time.time()
+    batch_size = 1000
     final_result = {}
     with open(result_jsonl_path, 'r', encoding='utf-8') as f:
-        for line in f:
+        for i, line in enumerate(f):
             data = json.loads(line)
             final_result.update(data)
-    with open(result_json_path, 'w', encoding='utf-8') as f:
-        json.dump(final_result, f, indent=4, ensure_ascii=False)
+            if (i + 1) % batch_size == 0:
+                with open(result_json_path + '.tmp', 'a', encoding='utf-8') as f_tmp:
+                    json.dump(final_result, f_tmp, indent=4, ensure_ascii=False)
+                final_result = {}
+    # Write remaining results
+    if final_result:
+        with open(result_json_path + '.tmp', 'a', encoding='utf-8') as f_tmp:
+            json.dump(final_result, f_tmp, indent=4, ensure_ascii=False)
+    if os.path.exists(result_json_path + '.tmp'):
+        os.rename(result_json_path + '.tmp', result_json_path)
     convert_time = time.time() - convert_start
     logger.info(f"Result JSON converted in {convert_time:.2f} seconds\n")
 
