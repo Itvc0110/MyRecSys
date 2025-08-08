@@ -147,7 +147,7 @@ if __name__ == "__main__":
     model.load_state_dict(checkpoint["model_state_dict"])
 
     # Process users in chunks
-    user_batch_size = 50
+    user_batch_size = 10
     num_users = len(user_profile_df)
     num_chunks = ceil(num_users / user_batch_size)
     result_dict = {}
