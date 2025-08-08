@@ -4,16 +4,21 @@ import polars as pl
 import torch
 from tqdm import tqdm
 import json
-import time
 from pathlib import Path
-import glob  # Added import for glob
+import glob
 from math import ceil
+import logging
+import time
 
 from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
 from rule_process import get_rulename
 from user_process import process_user_data
 from item_process import process_clip_item
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger(__name__)
 
 def rank_result(data, n):
     reordered_data = {}
@@ -52,11 +57,46 @@ def infer(model, data, device):
             torch.cuda.empty_cache()
     return predictions
 
+def save_chunk_results(temp_dict, result_file, rule_content_file, homepage_rule, content_dict, rule_info_path, tags_path):
+    # Apply metadata and rules for the chunk
+    chunk_result = {}
+    for pid, data in temp_dict.items():
+        for cid, cdata in data['suggested_content'].items():
+            meta = content_dict.get(cid)
+            if meta:
+                cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
+        chunk_result[pid] = data
+
+    # Rank and apply rules
+    reordered_chunk = rank_result(chunk_result, TOP_N)
+    result_with_rule = get_rulename(reordered_chunk, rule_info_path, tags_path)
+
+    # Append to result.jsonl
+    with open(result_file, 'a', encoding='utf-8') as f:
+        for pid, data in result_with_rule.items():
+            json.dump({pid: data}, f, ensure_ascii=False)
+            f.write('\n')
+
+    # Append to rule_content.txt and collect homepage_rule
+    with open(rule_content_file, 'a', encoding='utf-8') as f:
+        for pid, info in result_with_rule.items():
+            rulename_json_file = {'pid': pid, 'd': {}}
+            rule_content = f"{pid}|"
+            for key, content in info['suggested_content'].items():
+                if content['rule_id'] != -100:
+                    rulename_json_file['d'].setdefault(str(content['rule_id']), {})[key] = content['type_id']
+            for rule, content_ids in rulename_json_file['d'].items():
+                rule_content += f"{rule}," + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
+            rule_content = rule_content.rstrip(';') + '\n'
+            f.write(rule_content)
+            rulename_json_file['d'] = ','.join(rulename_json_file['d'])
+            homepage_rule.append(rulename_json_file)
+
 if __name__ == "__main__":
     start_time = time.time()
     TOP_N = 200
 
-    project_root = Path().resolve()
+    project_root = Path("/kaggle/working/MyRecSys/clip").resolve()
     os.makedirs(project_root / "clip" / "result", exist_ok=True)
     os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
@@ -69,60 +109,58 @@ if __name__ == "__main__":
     tags_path = os.path.join(project_root, "tags")
     rule_info_path = os.path.join(project_root, "rule_info.parquet")
     result_json_path = os.path.join(project_root, "clip/result/result.json")
+    result_jsonl_path = os.path.join(project_root, "clip/result/result.jsonl")
     rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
     rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
     # Preprocess user and item data
-    print("Preprocessing user and item data...")
+    logger.info("=== Preprocessing User and Item Data ===")
     preprocess_start = time.time()
     try:
-        # Process user data
         if not os.path.exists(processed_user_path):
-            print("  ↪︎ Processing user data...")
+            logger.info("  Processing user data...")
             user_process_start = time.time()
             process_user_data(user_data_path, output_dir="clip/infer_data", num_user=-1, mode='infer')
             user_process_time = time.time() - user_process_start
-            print(f"  ↪︎ User data processed in {user_process_time:.2f} seconds")
+            logger.info(f"  User data processed in {user_process_time:.2f} seconds")
         else:
-            print("  ↪︎ User data already exists, skipping preprocessing.")
+            logger.info("  User data already exists, skipping preprocessing.")
 
-        # Process item data
         if not os.path.exists(processed_item_path):
-            print("  ↪︎ Processing item data...")
+            logger.info("  Processing item data...")
             item_process_start = time.time()
             process_clip_item(clip_data_path, output_dir="clip/infer_data", num_clip=-1, mode='infer')
             item_process_time = time.time() - item_process_start
-            print(f"  ↪︎ Item data processed in {item_process_time:.2f} seconds")
+            logger.info(f"  Item data processed in {item_process_time:.2f} seconds")
         else:
-            print("  ↪︎ Item data already exists, skipping preprocessing.")
+            logger.info("  Item data already exists, skipping preprocessing.")
     except FileNotFoundError as e:
-        print(f"Error: {e}")
-        print("Ensure raw data files (month_mytv_info.parquet, mytv_vmp_content) and encoders/scalers are available.")
+        logger.error(f"Error: {e}")
+        logger.error("Ensure raw data files (month_mytv_info.parquet, mytv_vmp_content) and encoders/scalers are available.")
         exit(1)
     preprocess_time = time.time() - preprocess_start
-    print(f"Preprocessing completed in {preprocess_time:.2f} seconds")
+    logger.info(f"Preprocessing completed in {preprocess_time:.2f} seconds\n")
 
     # Load preprocessed data
-    print("\nLoading user and item data...")
+    logger.info("=== Loading User and Item Data ===")
     load_start = time.time()
     try:
         user_df = pd.read_parquet(processed_user_path)
         clip_df = pd.read_parquet(processed_item_path)
     except FileNotFoundError as e:
-        print(f"Error: {e}")
-        print("Preprocessing failed to generate required parquet files.")
+        logger.error(f"Error: {e}")
+        logger.error("Preprocessing failed to generate required parquet files.")
         exit(1)
-    
-    # Load duration data for user-profile mappings
+
     duration_dir = os.path.join(project_root, "clip/merged_duration")
     if not os.path.exists(duration_dir):
-        print(f"Error: Duration directory not found at {duration_dir}")
-        print("Run merge_parquet_files from duration_process.py to generate duration files.")
+        logger.error(f"Error: Duration directory not found at {duration_dir}")
+        logger.error("Run merge_parquet_files from duration_process.py to generate duration files.")
         exit(1)
     durations = glob.glob(os.path.join(duration_dir, "*.parquet"))
     if not durations:
-        print(f"Error: No duration data found in {duration_dir}")
-        print("Run merge_parquet_files from duration_process.py to generate duration files.")
+        logger.error(f"Error: No duration data found in {duration_dir}")
+        logger.error("Run merge_parquet_files from duration_process.py to generate duration files.")
         exit(1)
     user_profile_list = []
     for duration in durations:
@@ -130,39 +168,70 @@ if __name__ == "__main__":
         user_profile_list.append(df.drop_duplicates())
     user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
-    
     load_time = time.time() - load_start
-    print(f"Data loaded in {load_time:.2f} seconds")
+    logger.info(f"Data loaded in {load_time:.2f} seconds")
+    logger.info(f"Loaded {len(user_profile_df)} users and {len(clip_df)} items\n")
+
+    # Load content metadata
+    logger.info("=== Loading Content Metadata ===")
+    meta_load_start = time.time()
+    try:
+        content_clip_pl = pl.read_parquet(content_clip_path)
+    except FileNotFoundError:
+        logger.error(f"Error: Content metadata not found at {content_clip_path}")
+        exit(1)
+    content_unique = (
+        content_clip_pl
+        .unique(subset=['content_id'])
+        .select(['content_id', 'content_name', 'tag_names', 'type_id'])
+    )
+    content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
+    meta_load_time = time.time() - meta_load_start
+    logger.info(f"Content metadata loaded in {meta_load_time:.2f} seconds\n")
 
     # Load model
+    logger.info("=== Loading Model ===")
+    model_load_start = time.time()
     checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
     try:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         checkpoint = torch.load(checkpoint_path, map_location=device)
     except FileNotFoundError:
-        print(f"Error: Model checkpoint not found at {checkpoint_path}")
+        logger.error(f"Error: Model checkpoint not found at {checkpoint_path}")
         exit(1)
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
     model = DCNv3(expected_input_dim).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
+    model_load_time = time.time() - model_load_start
+    logger.info(f"Model loaded in {model_load_time:.2f} seconds\n")
 
     # Process users in chunks
-    user_batch_size = 10
+    user_batch_size = 50
     num_users = len(user_profile_df)
     num_chunks = ceil(num_users / user_batch_size)
-    result_dict = {}
     total_pairs = 0
+    chunk_times = []
+    homepage_rule = []
 
-    print(f"\nProcessing {num_users} users in {num_chunks} chunks...")
+    logger.info(f"=== Processing {num_users} Users in {num_chunks} Chunks ===")
+    # Clear result files if they exist
+    if os.path.exists(result_jsonl_path):
+        os.remove(result_jsonl_path)
+    if os.path.exists(rule_content_path):
+        os.remove(rule_content_path)
+
     for i in range(num_chunks):
         chunk_start = time.time()
-        print(f"[Chunk {i+1}/{num_chunks}] Processing...")
-        
+        logger.info(f"[Chunk {i+1}/{num_chunks}]")
+
         # Select user chunk
+        select_start = time.time()
         start_idx = i * user_batch_size
         end_idx = min((i+1) * user_batch_size, num_users)
         user_chunk = user_profile_df.iloc[start_idx:end_idx]
-        
+        select_time = time.time() - select_start
+        logger.info(f"  Select users: {select_time:.2f} seconds ({len(user_chunk)} users)")
+
         # Perform cross join
         cross_start = time.time()
         user_chunk_pl = pl.from_pandas(user_chunk)
@@ -170,27 +239,34 @@ if __name__ == "__main__":
         cross_df = user_chunk_pl.join(clip_pl, how="cross")
         cross_df_pd = cross_df.to_pandas()
         cross_time = time.time() - cross_start
-        print(f"  ↪︎ Cross join: {cross_time:.2f} seconds")
-        
+        logger.info(f"  Cross join: {cross_time:.2f} seconds ({len(cross_df)} pairs)")
+
         # Prepare data for inference
+        prep_start = time.time()
         exclude = {'username', 'content_id', 'profile_id'}
         to_convert = [col for col in cross_df_pd.columns if col not in exclude]
         cross_df_pd[to_convert] = cross_df_pd[to_convert].apply(pd.to_numeric, errors='coerce')
         cross_df_pd = cross_df_pd.dropna()
         cross_df_pd = cross_df_pd.astype({col: 'float32' for col in to_convert})
-        
         interaction_df = cross_df_pd[['username', 'content_id', 'profile_id']]
         features = cross_df_pd.drop(columns=['username', 'content_id', 'profile_id'])
-        
-        # Run inference
-        infer_start = time.time()
+        prep_time = time.time() - prep_start
+        logger.info(f"  Data preparation: {prep_time:.2f} seconds")
+
+        # Create tensor
+        tensor_start = time.time()
         infer_tensor = torch.tensor(features.to_numpy(), dtype=torch.float32)
         infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
+        tensor_time = time.time() - tensor_start
+        logger.info(f"  Tensor creation: {tensor_time:.2f} seconds")
+
+        # Run inference
+        infer_start = time.time()
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
         infer_time = time.time() - infer_start
-        print(f"  ↪︎ Inference: {infer_time:.2f} seconds")
-        
+        logger.info(f"  Inference: {infer_time:.2f} seconds")
+
         # Collect top N results per user
         collect_start = time.time()
         temp_dict = {}
@@ -203,7 +279,8 @@ if __name__ == "__main__":
             if pid not in temp_dict:
                 temp_dict[pid] = []
             temp_dict[pid].append((cid, float(score)))
-        
+
+        result_dict = {}
         for pid in temp_dict:
             sorted_items = sorted(temp_dict[pid], key=lambda x: x[1], reverse=True)[:TOP_N]
             result_dict[pid] = {
@@ -220,78 +297,50 @@ if __name__ == "__main__":
                     'profile_id': pid
                 }
             }
-        
         collect_time = time.time() - collect_start
-        print(f"  ↪︎ Collect top {TOP_N}: {collect_time:.2f} seconds")
+        logger.info(f"  Collect top {TOP_N}: {collect_time:.2f} seconds")
+
+        # Save chunk results to final files
+        save_start = time.time()
+        save_chunk_results(result_dict, result_jsonl_path, rule_content_path, homepage_rule, content_dict, rule_info_path, tags_path)
+        save_time = time.time() - save_start
+        logger.info(f"  Save chunk results: {save_time:.2f} seconds")
+
         chunk_time = time.time() - chunk_start
-        print(f"  ↪︎ Total chunk time: {chunk_time:.2f} seconds | Pairs: {len(predictions):,}")
+        chunk_times.append(chunk_time)
+        logger.info(f"  Total chunk time: {chunk_time:.2f} seconds | Pairs: {len(predictions):,}\n")
 
-    # Add content metadata
-    print("\nAdding content metadata...")
-    meta_start = time.time()
-    try:
-        content_clip_pl = pl.read_parquet(content_clip_path)
-    except FileNotFoundError:
-        print(f"Error: Content metadata not found at {content_clip_path}")
-        exit(1)
-    content_unique = (
-        content_clip_pl
-        .unique(subset=['content_id'])
-        .select(['content_id', 'content_name', 'tag_names', 'type_id'])
-    )
-    content_dict = {
-        row[0]: (row[1], row[2], row[3]) 
-        for row in content_unique.iter_rows()
-    }
-    for pid, pdata in result_dict.items():
-        for cid, cdata in pdata['suggested_content'].items():
-            meta = content_dict.get(cid)
-            if meta:
-                cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
-    meta_time = time.time() - meta_start
-    print(f"Content metadata added in {meta_time:.2f} seconds")
-
-    # Ranking and rule assignment
-    print("\nStarting ranking and rule assignment...")
-    rank_start = time.time()
-    reordered_result = rank_result(result_dict, TOP_N)
-    try:
-        result_with_rule = get_rulename(reordered_result, rule_info_path, tags_path)
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        print("Ensure rule_info.parquet and tags/ directory are available.")
-        exit(1)
-    rank_time = time.time() - rank_start
-    print(f"Ranking and rule assignment completed in {rank_time:.2f} seconds")
-
-    # Save results
-    print("\nSaving results...")
-    save_start = time.time()
-    homepage_rule = []
-    rule_content = ""
-    for pid, info in result_with_rule.items():
-        rulename_json_file = {'pid': pid, 'd': {}}
-        rule_content += str(pid) + '|'
-        for key, content in info['suggested_content'].items():
-            if content['rule_id'] != -100:
-                rulename_json_file['d'].setdefault(str(content['rule_id']), {})[key] = content['type_id']
-        for rule, content_ids in rulename_json_file['d'].items():
-            rule_content += str(rule) + ',' + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
-        rule_content = rule_content.rstrip(';') + '\n'
-        rulename_json_file['d'] = ','.join(rulename_json_file['d'])
-        homepage_rule.append(rulename_json_file)
-    
+    # Convert result.jsonl to result.json
+    logger.info("=== Converting Result JSONL to JSON ===")
+    convert_start = time.time()
+    final_result = {}
+    with open(result_jsonl_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            data = json.loads(line)
+            final_result.update(data)
     with open(result_json_path, 'w', encoding='utf-8') as f:
-        json.dump(result_with_rule, f, indent=4, ensure_ascii=False)
+        json.dump(final_result, f, indent=4, ensure_ascii=False)
+    convert_time = time.time() - convert_start
+    logger.info(f"Result JSON converted in {convert_time:.2f} seconds\n")
+
+    # Save rulename.json
+    logger.info("=== Saving Rulename JSON ===")
+    save_rulename_start = time.time()
     with open(rulename_json_path, 'w', encoding='utf-8') as f:
         json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
-    with open(rule_content_path, "w", encoding='utf-8') as f:
-        f.write(rule_content)
-    save_time = time.time() - save_start
-    print(f"Results saved in {save_time:.2f} seconds")
+    save_rulename_time = time.time() - save_rulename_start
+    logger.info(f"Rulename JSON saved in {save_rulename_time:.2f} seconds\n")
+
+    # Clean up temporary result.jsonl
+    if os.path.exists(result_jsonl_path):
+        os.remove(result_jsonl_path)
+        logger.info(f"Temporary result.jsonl deleted")
 
     # Final timing summary
     total_time = time.time() - start_time
-    print(f"\nTotal time: {total_time:.2f} seconds")
-    print(f"Total user-item pairs: {total_pairs:,}")
-    print(f"Average inference time per pair: {total_time / total_pairs:.6f} seconds")
+    logger.info("=== Final Timing Summary ===")
+    logger.info(f"Total time: {total_time:.2f} seconds")
+    logger.info(f"Total user-item pairs: {total_pairs:,}")
+    logger.info(f"Average inference time per pair: {total_time / total_pairs:.6f} seconds")
+    logger.info(f"Average chunk time: {sum(chunk_times) / len(chunk_times):.2f} seconds")
+    logger.info(f"Number of chunks processed: {len(chunk_times)}")
