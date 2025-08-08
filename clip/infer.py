@@ -137,6 +137,12 @@ if __name__ == "__main__":
     # Move model to device
     model.to(device)
 
+    model.eval()
+    with torch.no_grad():
+        dummy_input = torch.randn(1, expected_input_dim, device=device)
+        _ = model(dummy_input)
+
+
     # Load clip_pl once
     clip_pl = pl.from_pandas(clip_df)
 
