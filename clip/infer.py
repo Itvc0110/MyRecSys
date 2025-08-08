@@ -7,13 +7,11 @@ import json
 import time
 from pathlib import Path
 from glob import glob
+from math import ceil
 
 from torch.utils.data import DataLoader, TensorDataset
-from processing import process_infer_data
 from dcnv3 import DCNv3
 from rule_process import get_rulename
-from item_process import process_clip_item
-
 
 def rank_result(data, n):
     reordered_data = {}
@@ -41,7 +39,6 @@ def rank_result(data, n):
         }
     return reordered_data
 
-
 def infer(model, data, device):
     model.eval()
     predictions = []
@@ -53,28 +50,41 @@ def infer(model, data, device):
             torch.cuda.empty_cache()
     return predictions
 
-
-# --- Replace main block (if __name__ == "__main__") with this ---
-
 if __name__ == "__main__":
     start_time = time.time()
     TOP_N = 200
-    project_root = Path().resolve()
 
-    # Prepare output folders
+    project_root = Path().resolve()
     os.makedirs(project_root / "clip" / "result", exist_ok=True)
     os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
-    # Paths
-    user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
-    clip_data_path = os.path.join(project_root, "mytv_vmp_content")
+    # Define file paths
+    user_data_path = os.path.join(project_root, "clip/infer_data/user_data.parquet")
+    item_data_path = os.path.join(project_root, "clip/infer_data/clip_item_data.parquet")
     content_clip_path = os.path.join(project_root, "clip/infer_data/merged_content_clips.parquet")
     tags_path = os.path.join(project_root, "tags")
     rule_info_path = os.path.join(project_root, "rule_info.parquet")
-
     result_json_path = os.path.join(project_root, "clip/result/result.json")
     rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
     rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
+
+    # Load preprocessed data
+    print("Loading user and item data...")
+    load_start = time.time()
+    user_df = pd.read_parquet(user_data_path)
+    clip_df = pd.read_parquet(item_data_path)
+    
+    # Load duration data for user-profile mappings
+    durations = glob.glob(os.path.join(project_root, "clip/merged_duration", "*.parquet"))
+    user_profile_list = []
+    for duration in durations:
+        df = pd.read_parquet(duration, columns=["username", "profile_id"])
+        user_profile_list.append(df.drop_duplicates())
+    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
+    user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
+    
+    load_time = time.time() - load_start
+    print(f"Data loaded in {load_time:.2f} seconds")
 
     # Load model
     checkpoint_path = "model/clip/best_model.pth"
@@ -83,143 +93,144 @@ if __name__ == "__main__":
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
     model = DCNv3(expected_input_dim).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
 
+    # Process users in chunks
+    user_batch_size = 50
+    num_users = len(user_profile_df)
+    num_chunks = ceil(num_users / user_batch_size)
     result_dict = {}
     total_pairs = 0
 
-    # Optionally load content metadata early for mapping after inference
-    # (this uses the merged content file saved by process_clip_item)
-    try:
-        content_clip_pl = pl.read_parquet(content_clip_path)
-        content_unique = (
-            content_clip_pl
-            .unique(subset=['content_id'])
-            .select(['content_id', 'content_name', 'tag_names', 'type_id'])
-        )
-        content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
-        print(f"[Info] Loaded {len(content_dict)} unique content metadata entries from {content_clip_path}")
-    except Exception as e:
-        print(f"[Warning] Could not load content metadata ({content_clip_path}): {e}")
-        content_dict = {}
-
-    # --- On-the-fly pipeline ---
-    for chunk_idx, user_chunk, clip_df in process_infer_data(user_data_path, clip_data_path,
-                                                              num_user=-1, num_clip=-1,
-                                                              output_dir_path="clip/infer_data",
-                                                              user_batch_size=10):
-
+    print(f"Processing {num_users} users in {num_chunks} chunks...")
+    for i in range(num_chunks):
         chunk_start = time.time()
-        print(f"\n[Chunk {chunk_idx}] Processing {len(user_chunk)} users...")
-
-        # Cross join (polars) -> pandas
-        t0 = time.time()
-        cross_pl = pl.from_pandas(user_chunk).join(pl.from_pandas(clip_df), how="cross")
-        cross_df = cross_pl.fill_null(0).to_pandas()
-        cross_elapsed = time.time() - t0
-        print(f"  ↪︎ Cross join: {len(cross_df)} rows in {cross_elapsed:.2f}s")
-
-        # Prepare features (drop identifiers)
+        print(f"[Chunk {i+1}/{num_chunks}] Processing...")
+        
+        # Select user chunk
+        start_idx = i * user_batch_size
+        end_idx = min((i+1) * user_batch_size, num_users)
+        user_chunk = user_profile_df.iloc[start_idx:end_idx]
+        
+        # Perform cross join
+        cross_start = time.time()
+        user_chunk_pl = pl.from_pandas(user_chunk)
+        clip_pl = pl.from_pandas(clip_df)
+        cross_df = user_chunk_pl.join(clip_pl, how="cross")
+        cross_df_pd = cross_df.to_pandas()
+        cross_time = time.time() - cross_start
+        print(f"  ↪︎ Cross join: {cross_time:.2f} seconds")
+        
+        # Prepare data for inference
         exclude = {'username', 'content_id', 'profile_id'}
-        to_convert = [col for col in cross_df.columns if col not in exclude]
-        cross_df[to_convert] = cross_df[to_convert].apply(pd.to_numeric, errors='coerce')
-        cross_df = cross_df.dropna().reset_index(drop=True)
-        cross_df = cross_df.astype({col: 'float32' for col in to_convert})
-
-        if cross_df.shape[0] == 0:
-            print(f"  ↪︎ Skipping: cross chunk produced 0 rows after cleaning")
-            continue
-
-        interaction_df = cross_df[['username', 'content_id', 'profile_id']]
-        features = cross_df.drop(columns=['username', 'content_id', 'profile_id'])
-
-        # Check feature dimension matches model expectation
-        if features.shape[1] != expected_input_dim:
-            raise RuntimeError(
-                f"Feature dimension mismatch: features.shape[1]={features.shape[1]} "
-                f"but model expected {expected_input_dim}. "
-                f"Columns: {list(features.columns)}"
-            )
-
-        # Inference
-        t0 = time.time()
+        to_convert = [col for col in cross_df_pd.columns if col not in exclude]
+        cross_df_pd[to_convert] = cross_df_pd[to_convert].apply(pd.to_numeric, errors='coerce')
+        cross_df_pd = cross_df_pd.dropna()
+        cross_df_pd = cross_df_pd.astype({col: 'float32' for col in to_convert})
+        
+        interaction_df = cross_df_pd[['username', 'content_id', 'profile_id']]
+        features = cross_df_pd.drop(columns=['username', 'content_id', 'profile_id'])
+        
+        # Run inference
+        infer_start = time.time()
         infer_tensor = torch.tensor(features.to_numpy(), dtype=torch.float32)
-        # DataLoader accepts datasets of tensors; we keep single-tensor dataset
-        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False,
-                                  pin_memory=(device.type == 'cuda'))
+        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
         predictions = infer(model, infer_loader, device)
-        infer_elapsed = time.time() - t0
-        print(f"  ↪︎ Inference took {infer_elapsed:.2f}s for {len(predictions):,} pairs")
-
         total_pairs += len(predictions)
-
-        # Store results into result_dict
+        infer_time = time.time() - infer_start
+        print(f"  ↪︎ Inference: {infer_time:.2f} seconds")
+        
+        # Collect top N results per user
+        collect_start = time.time()
+        temp_dict = {}
         for pid, user, cid, score in zip(
             interaction_df['profile_id'],
             interaction_df['username'],
             interaction_df['content_id'],
             predictions
         ):
-            pid = str(pid)
-            cid = str(cid)
-            result_dict.setdefault(pid, {})
-            result_dict[pid].setdefault('suggested_content', {})
-            result_dict[pid]['suggested_content'][cid] = {
-                'content_name': '',  # will fill from metadata below
-                'tag_names': '',
-                'type_id': '',
-                'score': float(score)
+            if pid not in temp_dict:
+                temp_dict[pid] = []
+            temp_dict[pid].append((cid, float(score)))
+        
+        for pid in temp_dict:
+            sorted_items = sorted(temp_dict[pid], key=lambda x: x[1], reverse=True)[:TOP_N]
+            result_dict[pid] = {
+                'suggested_content': {
+                    cid: {
+                        'content_name': '',
+                        'tag_names': '',
+                        'type_id': '',
+                        'score': score
+                    } for cid, score in sorted_items
+                },
+                'user': {
+                    'username': user_profile_df.loc[user_profile_df['profile_id'] == pid, 'username'].iloc[0],
+                    'profile_id': pid
+                }
             }
-            result_dict[pid]['user'] = {'username': user, 'profile_id': pid}
+        
+        collect_time = time.time() - collect_start
+        print(f"  ↪︎ Collect top {TOP_N}: {collect_time:.2f} seconds")
+        chunk_time = time.time() - chunk_start
+        print(f"  ↪︎ Total chunk time: {chunk_time:.2f} seconds | Pairs: {len(predictions):,}")
 
-        # Cleanup to free memory
-        del cross_pl, cross_df, interaction_df, features, infer_tensor, infer_loader, predictions
-        torch.cuda.empty_cache()
-        import gc
-        gc.collect()
+    # Add content metadata
+    print("\nAdding content metadata...")
+    meta_start = time.time()
+    content_clip_pl = pl.read_parquet(content_clip_path)
+    content_unique = (
+        content_clip_pl
+        .unique(subset=['content_id'])
+        .select(['content_id', 'content_name', 'tag_names', 'type_id'])
+    )
+    content_dict = {
+        row[0]: (row[1], row[2], row[3]) 
+        for row in content_unique.iter_rows()
+    }
+    for pid, pdata in result_dict.items():
+        for cid, cdata in pdata['suggested_content'].items():
+            meta = content_dict.get(cid)
+            if meta:
+                cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
+    meta_time = time.time() - meta_start
+    print(f"Content metadata added in {meta_time:.2f} seconds")
 
-        print(f"[Chunk {chunk_idx}] Done in {time.time() - chunk_start:.2f}s | Cumulative pairs: {total_pairs:,}")
+    # Ranking and rule assignment
+    print("\nStarting ranking and rule assignment...")
+    rank_start = time.time()
+    reordered_result = rank_result(result_dict, TOP_N)
+    result_with_rule = get_rulename(reordered_result, rule_info_path, tags_path)
+    rank_time = time.time() - rank_start
+    print(f"Ranking and rule assignment completed in {rank_time:.2f} seconds")
 
-    # Add content metadata (content_name, tag_names, type_id) into result_dict
-    if content_dict:
-        for pid, pdata in result_dict.items():
-            for cid, cdata in pdata['suggested_content'].items():
-                meta = content_dict.get(str(cid))
-                if meta:
-                    cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
-
-    # Ranking & rule assignment
-    print("\nRanking results...")
-    ranked = rank_result(result_dict, TOP_N)
-
-    print("\nApplying rules...")
-    ruled = get_rulename(ranked, rule_info_path, tags_path)
-
-    # Build homepage rules / rule_content
+    # Save results
+    print("\nSaving results...")
+    save_start = time.time()
     homepage_rule = []
     rule_content = ""
-    for pid, info in ruled.items():
+    for pid, info in result_with_rule.items():
         rulename_json_file = {'pid': pid, 'd': {}}
         rule_content += str(pid) + '|'
-        for cid, content in info['suggested_content'].items():
-            if content.get('rule_id', -100) != -100:
-                rulename_json_file['d'].setdefault(str(content['rule_id']), {})[cid] = content['type_id']
+        for key, content in info['suggested_content'].items():
+            if content['rule_id'] != -100:
+                rulename_json_file['d'].setdefault(str(content['rule_id']), {})[key] = content['type_id']
         for rule, content_ids in rulename_json_file['d'].items():
             rule_content += str(rule) + ',' + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
         rule_content = rule_content.rstrip(';') + '\n'
         rulename_json_file['d'] = ','.join(rulename_json_file['d'])
         homepage_rule.append(rulename_json_file)
-
-    # Save outputs
+    
     with open(result_json_path, 'w', encoding='utf-8') as f:
-        json.dump(ruled, f, indent=4, ensure_ascii=False)
+        json.dump(result_with_rule, f, indent=4, ensure_ascii=False)
     with open(rulename_json_path, 'w', encoding='utf-8') as f:
         json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
-    with open(rule_content_path, 'w', encoding='utf-8') as f:
+    with open(rule_content_path, "w", encoding='utf-8') as f:
         f.write(rule_content)
+    save_time = time.time() - save_start
+    print(f"Results saved in {save_time:.2f} seconds")
 
-    elapsed = time.time() - start_time
-    avg_per_pair = (elapsed / total_pairs) if total_pairs else float('nan')
-    print(f"\n✅ Inference pipeline completed in {elapsed:.2f}s")
+    # Final timing summary
+    total_time = time.time() - start_time
+    print(f"\nTotal time: {total_time:.2f} seconds")
     print(f"Total user-item pairs: {total_pairs:,}")
-    print(f"Average time per pair: {avg_per_pair:.6f} seconds")
+    print(f"Average inference time per pair: {total_time / total_pairs:.6f} seconds")
