@@ -4,6 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 import polars as pl
+import glob
 from glob import glob  
 
 from user_process import process_user_data
@@ -135,12 +136,12 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
 
     # --- Step 2: Merge profile_id from duration data ---
     duration_dir = os.path.join(project_root, "clip/merged_duration")
-    if not os.path.exists(duration_dir) or not glob(os.path.join(duration_dir, "*.parquet")):
+    if not os.path.exists(duration_dir) or not glob.glob(os.path.join(duration_dir, "*.parquet")):
         print("[process_infer_data] Creating merged duration parquet files...")
         merge_parquet_files(os.path.join(project_root, "duration"), duration_dir)
 
     profile_map_list = []
-    for f in glob(os.path.join(duration_dir, "*.parquet")):
+    for f in glob.glob(os.path.join(duration_dir, "*.parquet")):
         try:
             df = pd.read_parquet(f, columns=["username", "profile_id"]).drop_duplicates()
             profile_map_list.append(df)
