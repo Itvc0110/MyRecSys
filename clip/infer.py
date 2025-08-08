@@ -105,6 +105,11 @@ if __name__ == "__main__":
     print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
 
     # Load model once
+
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+        _ = torch.randn(1).to('cuda')
+
     checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     checkpoint = torch.load(checkpoint_path, map_location=device)
