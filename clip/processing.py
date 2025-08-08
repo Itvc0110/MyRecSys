@@ -1,12 +1,14 @@
-from duration_process import merge_parquet_files
-from item_process import process_clip_item
-from user_process import process_user_data
-import glob, os
-from time import time
-import numpy as np
 from pathlib import Path
+from time import time
+import os
+import numpy as np
 import pandas as pd
 import polars as pl
+from glob import glob  
+
+from user_process import process_user_data
+from item_process import process_clip_item
+from duration_process import merge_parquet_files
 
 def write_cross_chunk(args):
     i, user_chunk_pd, clip_df_pd, chunk_size, infer_subdir = args
@@ -100,8 +102,11 @@ def process_data(output_filepath):
 def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, output_dir_path,
                        user_batch_size=20):
     """
-    Preprocess clip user & item data, ensure metadata and profile_id exist,
-    then yield user chunks + full clip DataFrame for on-the-fly inference.
+    Preprocess clip user & item data for inference.
+    Ensures:
+      - merged_content_clips.parquet exists with metadata
+      - profile_id is merged into user data
+    Yields (chunk_idx, user_chunk_df, full_clip_df) for on-the-fly inference.
     """
     overall_start = time()
     project_root = Path().resolve()
@@ -112,8 +117,15 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     merged_content_path = os.path.join(output_dir, "merged_content_clips.parquet")
     if not os.path.exists(merged_content_path):
         print(f"[process_infer_data] Merged content metadata missing. Creating at {merged_content_path}...")
-        process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer')
-        # process_clip_item should internally save merged_content_clips.parquet
+        clip_metadata_df = process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer')
+        # Save only metadata columns if they exist
+        meta_cols = ['content_id', 'content_name', 'tag_names', 'type_id']
+        meta_cols = [c for c in meta_cols if c in clip_metadata_df.columns]
+        if meta_cols:
+            clip_metadata_df[meta_cols].drop_duplicates().to_parquet(merged_content_path, index=False)
+            print(f"[process_infer_data] Saved metadata: {merged_content_path}")
+        else:
+            print(f"[Warning] No metadata columns found to save at {merged_content_path}")
 
     # --- Step 1: User preprocessing ---
     t0 = time()
@@ -147,9 +159,9 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     print("[process_infer_data] Loading & preprocessing clip item data...")
     clip_df = process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer').head(num_clip)
     clip_df['content_id'] = clip_df['content_id'].astype(str)
-    print(f"  ↪︎ clip preprocess done: {len(clip_df)} rows ({time() - t0:.2f}s)")
+    print(f"  ↪︎ Clip preprocess done: {len(clip_df)} rows ({time() - t0:.2f}s)")
 
-    # Save preprocessed data once
+    # Save preprocessed data for reference
     user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
     clip_item_path = os.path.join(output_dir, "clip_item_data.parquet")
     user_df.to_parquet(user_profile_path, index=False)
@@ -159,7 +171,7 @@ def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, outpu
     print(f"[process_infer_data] Total users: {len(user_df)}, Total clips: {len(clip_df)}, "
           f"Estimated rows: {len(user_df) * len(clip_df):,}")
 
-    # --- Step 4: Yield chunks ---
+    # --- Step 4: Yield chunks for on-the-fly inference ---
     total_users = len(user_df)
     for idx, start in enumerate(range(0, total_users, user_batch_size), start=1):
         yield idx, user_df.iloc[start:start + user_batch_size], clip_df
