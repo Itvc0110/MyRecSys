@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
 from rule_process import get_rulename
 from user_process import process_user_data
-from item_process import process_clip_item, process_movie_item
+from item_process import process_clip_item, process_clip_item
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -95,7 +95,7 @@ def save_chunk_results(temp_dict, result_file, rule_content_file, homepage_rule,
 if __name__ == "__main__":
     start_time = time.time()
     TOP_N = 200
-    CONTENT_TYPE = "clip"  # Set to "movie" for movie data
+    CONTENT_TYPE = "clip"  # Set to "clip" for clip data
 
     project_root = Path("/kaggle/working/MyRecSys/clip").resolve()
     content_dir = CONTENT_TYPE
@@ -133,7 +133,7 @@ if __name__ == "__main__":
         if not os.path.exists(processed_item_path):
             logger.info("  Processing item data...")
             item_process_start = time.time()
-            process_item = process_clip_item if CONTENT_TYPE == "clip" else process_movie_item
+            process_item = process_clip_item if CONTENT_TYPE == "clip" else process_clip_item
             process_item(item_data_path, output_dir=f"{content_dir}/infer_data", num_clip=-1 if CONTENT_TYPE == "clip" else -1, mode='infer')
             item_process_time = time.time() - item_process_start
             logger.info(f"  Item data processed in {item_process_time:.2f} seconds")
