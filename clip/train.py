@@ -199,8 +199,8 @@ if __name__ == "__main__":
 
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
     val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=2048, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=2048, shuffle=False)
 
     input_dim = X_train_tensor.shape[1]
     model = DCNv3(input_dim)
