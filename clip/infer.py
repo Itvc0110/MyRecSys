@@ -106,42 +106,13 @@ if __name__ == "__main__":
 
     # Load model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Load checkpoint
-    # Load device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
     # Load checkpoint
     checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
     checkpoint = torch.load(checkpoint_path, map_location=device)
-
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
-
-    # Warm up CUDA context before inference
-    if device.type == 'cuda':
-        # Pass device index (int) to set_device
-        torch.cuda.set_device(device.index if device.index is not None else 0)
-        torch.backends.cudnn.benchmark = True  # Enable autotuner
-        # Warm-up dummy tensor on GPU with expected input dim
-        _ = torch.randn(1, expected_input_dim, device=device)
-
-    # Initialize model and load weights
     model = DCNv3(expected_input_dim)
     model.load_state_dict(checkpoint["model_state_dict"])
-
-    # Wrap model for multi-GPU if available
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs")
-        model = torch.nn.DataParallel(model)
-
-    # Move model to device
     model.to(device)
-
-    model.eval()
-    with torch.no_grad():
-        dummy_input = torch.randn(1, expected_input_dim, device=device)
-        _ = model(dummy_input)
-
 
     # Load clip_pl once
     clip_pl = pl.from_pandas(clip_df)
@@ -192,7 +163,7 @@ if __name__ == "__main__":
         # Inference
         infer_start = time.time()
         infer_tensor = torch.tensor(features_np, dtype=torch.float32)
-        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
+        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=4096, shuffle=False)
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
         print(f"  ↪︎ Inference: {time.time()-infer_start:.2f} seconds")
