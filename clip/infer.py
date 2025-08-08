@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import polars as pl
+import gc
 import torch
 from tqdm import tqdm
 import json
@@ -49,7 +50,7 @@ def infer(model, data, device):
             inputs = batch[0].to(device)
             outputs = model(inputs)
             predictions.extend(outputs['y_pred'].detach().cpu().numpy())
-            torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
     return predictions
 
 if __name__ == "__main__":
@@ -60,7 +61,7 @@ if __name__ == "__main__":
     os.makedirs(project_root / "clip" / "result", exist_ok=True)
     os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
-    # Define file paths
+    # File paths
     user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
     clip_data_path = os.path.join(project_root, "mytv_vmp_content")
     processed_user_path = os.path.join(project_root, "clip/infer_data/user_data.parquet")
@@ -75,37 +76,26 @@ if __name__ == "__main__":
     # Preprocess
     print("Preprocessing user and item data...")
     preprocess_start = time.time()
-    try:
-        if not os.path.exists(processed_user_path):
-            print("  ↪︎ Processing user data...")
-            process_user_data(user_data_path, output_dir="clip/infer_data", num_user=-1, mode='infer')
-        else:
-            print("  ↪︎ User data already exists, skipping preprocessing.")
-        if not os.path.exists(processed_item_path):
-            print("  ↪︎ Processing item data...")
-            process_clip_item(clip_data_path, output_dir="clip/infer_data", num_clip=-1, mode='infer')
-        else:
-            print("  ↪︎ Item data already exists, skipping preprocessing.")
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        exit(1)
+    if not os.path.exists(processed_user_path):
+        print("  ↪︎ Processing user data...")
+        process_user_data(user_data_path, output_dir="clip/infer_data", num_user=-1, mode='infer')
+    else:
+        print("  ↪︎ User data already exists, skipping preprocessing.")
+    if not os.path.exists(processed_item_path):
+        print("  ↪︎ Processing item data...")
+        process_clip_item(clip_data_path, output_dir="clip/infer_data", num_clip=-1, mode='infer')
+    else:
+        print("  ↪︎ Item data already exists, skipping preprocessing.")
     print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
 
-    # Load preprocessed data
+    # Load data
     print("\nLoading user and item data...")
-    try:
-        user_df = pd.read_parquet(processed_user_path)
-        clip_df = pd.read_parquet(processed_item_path)
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        exit(1)
+    user_df = pd.read_parquet(processed_user_path)
+    clip_df = pd.read_parquet(processed_item_path)
 
     # Duration mapping
     duration_dir = os.path.join(project_root, "clip/merged_duration")
     durations = glob.glob(os.path.join(duration_dir, "*.parquet"))
-    if not durations:
-        print(f"Error: No duration data found in {duration_dir}")
-        exit(1)
     user_profile_list = []
     for duration in durations:
         df = pd.read_parquet(duration, columns=["username", "profile_id"])
@@ -116,12 +106,8 @@ if __name__ == "__main__":
 
     # Load model once
     checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
-    try:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-    except FileNotFoundError:
-        print(f"Error: Model checkpoint not found at {checkpoint_path}")
-        exit(1)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    checkpoint = torch.load(checkpoint_path, map_location=device)
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
     model = DCNv3(expected_input_dim).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -129,21 +115,18 @@ if __name__ == "__main__":
     # Load clip_pl once
     clip_pl = pl.from_pandas(clip_df)
 
-    # Load content metadata once
-    try:
-        content_clip_pl = pl.read_parquet(content_clip_path)
-    except FileNotFoundError:
-        print(f"Error: Content metadata not found at {content_clip_path}")
-        exit(1)
+    # Print total contents
+    total_contents = clip_pl.height
+    print(f"\nTotal unique contents: {total_contents:,}")
+
+    # Load content metadata
+    content_clip_pl = pl.read_parquet(content_clip_path)
     content_unique = (
         content_clip_pl
         .unique(subset=['content_id'])
         .select(['content_id', 'content_name', 'tag_names', 'type_id'])
     )
-    content_dict = {
-        row[0]: (row[1], row[2], row[3])
-        for row in content_unique.iter_rows()
-    }
+    content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
 
     # Process in chunks
     user_batch_size = 10
@@ -161,26 +144,23 @@ if __name__ == "__main__":
         end_idx = min((i+1) * user_batch_size, num_users)
         user_chunk = user_profile_df.iloc[start_idx:end_idx]
 
-        # Cross join
+        # Cross join in Polars
         cross_start = time.time()
         user_chunk_pl = pl.from_pandas(user_chunk)
-        cross_df = user_chunk_pl.join(clip_pl, how="cross")
-        cross_df_pd = cross_df.to_pandas()
+        cross_df = user_chunk_pl.join(clip_pl, how="cross", streaming=True)
+
+        # Separate features & IDs in Polars
+        exclude = {"username", "content_id", "profile_id"}
+        to_convert = [col for col in cross_df.columns if col not in exclude]
+        cross_df = cross_df.cast({col: pl.Float32 for col in to_convert})
+
+        interaction_df = cross_df.select(["username", "content_id", "profile_id"]).to_pandas()
+        features_np = cross_df.select(to_convert).to_numpy()
         print(f"  ↪︎ Cross join: {time.time()-cross_start:.2f} seconds")
-
-        # Prepare features
-        exclude = {'username', 'content_id', 'profile_id'}
-        to_convert = [col for col in cross_df_pd.columns if col not in exclude]
-        cross_df_pd[to_convert] = cross_df_pd[to_convert].apply(pd.to_numeric, errors='coerce')
-        cross_df_pd = cross_df_pd.dropna()
-        cross_df_pd = cross_df_pd.astype({col: 'float32' for col in to_convert})
-
-        interaction_df = cross_df_pd[['username', 'content_id', 'profile_id']]
-        features = cross_df_pd.drop(columns=['username', 'content_id', 'profile_id'])
 
         # Inference
         infer_start = time.time()
-        infer_tensor = torch.tensor(features.to_numpy(), dtype=torch.float32)
+        infer_tensor = torch.tensor(features_np, dtype=torch.float32)
         infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
@@ -239,7 +219,7 @@ if __name__ == "__main__":
                 if content['rule_id'] != -100:
                     rulename_json_file['d'].setdefault(str(content['rule_id']), {})[key] = content['type_id']
             for rule, content_ids in rulename_json_file['d'].items():
-                rule_content += str(rule) + ',' + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
+                rule_content += str(rule) + ''.join(f'${v}#{k}' for k, v in content_ids.items()) + ';'
             rule_content = rule_content.rstrip(';') + '\n'
             rulename_json_file['d'] = ','.join(rulename_json_file['d'])
             homepage_rule.append(rulename_json_file)
@@ -252,9 +232,10 @@ if __name__ == "__main__":
             f.write(rule_content)
         print(f"  ↪︎ Saved chunk files in {time.time()-save_start:.2f} seconds")
 
-        # Cleanup
-        del predictions, temp_dict, chunk_result
+        # Cleanup aggressively
+        del predictions, temp_dict, chunk_result, cross_df, features_np, infer_tensor, infer_loader
         torch.cuda.empty_cache()
+        gc.collect()
         print(f"  ↪︎ Total chunk time: {time.time()-chunk_start:.2f} seconds\n")
 
     # Merge per-chunk files
