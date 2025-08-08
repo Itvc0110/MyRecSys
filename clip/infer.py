@@ -146,7 +146,7 @@ if __name__ == "__main__":
     }
 
     # Process in chunks
-    user_batch_size = 20
+    user_batch_size = 10
     num_users = len(user_profile_df)
     num_chunks = ceil(num_users / user_batch_size)
     total_pairs = 0
