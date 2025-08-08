@@ -147,7 +147,7 @@ if __name__ == "__main__":
         # Cross join in Polars
         cross_start = time.time()
         user_chunk_pl = pl.from_pandas(user_chunk)
-        cross_df = user_chunk_pl.join(clip_pl, how="cross", streaming=True)
+        cross_df = user_chunk_pl.join(clip_pl, how="cross")
 
         # Separate features & IDs in Polars
         exclude = {"username", "content_id", "profile_id"}
