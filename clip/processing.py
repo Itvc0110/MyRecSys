@@ -1,5 +1,3 @@
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import cpu_count
 from duration_process import merge_parquet_files
 from item_process import process_clip_item
 from user_process import process_user_data
@@ -98,67 +96,72 @@ def process_data(output_filepath):
         return combined_df
     else:
         return
-
-# processing.py  -- replace the existing process_infer_data with this
-
+    
 def process_infer_data(user_data_path, clip_data_path, num_user, num_clip, output_dir_path,
-                       user_batch_size=20, max_rows_warn_threshold=5_000_000):
+                       user_batch_size=20):
     """
-    Preprocess user and clip data, save to two parquet files, and yield user chunks
-    together with full clip dataframe for on-the-fly inference.
-
-    Parameters:
-      user_batch_size: number of user-profile rows to process per chunk
-      max_rows_warn_threshold: warn if chunk_size * n_clips exceeds this (protect memory)
-    Yields:
-      (chunk_idx (1-based), user_chunk_df (pandas), clip_df (pandas))
+    Preprocess clip user & item data, ensure metadata and profile_id exist,
+    then yield user chunks + full clip DataFrame for on-the-fly inference.
     """
-    from time import time
+    overall_start = time()
     project_root = Path().resolve()
     output_dir = os.path.join(project_root, output_dir_path)
     os.makedirs(output_dir, exist_ok=True)
 
-    overall_start = time()
+    # --- Step 0: Ensure merged content metadata exists ---
+    merged_content_path = os.path.join(output_dir, "merged_content_clips.parquet")
+    if not os.path.exists(merged_content_path):
+        print(f"[process_infer_data] Merged content metadata missing. Creating at {merged_content_path}...")
+        process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer')
+        # process_clip_item should internally save merged_content_clips.parquet
 
-    # 1) User preprocessing
+    # --- Step 1: User preprocessing ---
     t0 = time()
     print("[process_infer_data] Loading & preprocessing user data...")
     user_df = process_user_data(user_data_path, output_dir_path, num_user, mode='infer').head(num_user)
-    user_elapsed = time() - t0
-    print(f"  ↪︎ User preprocess done: {len(user_df)} rows ({user_elapsed:.2f}s)")
+    print(f"  ↪︎ User preprocess done: {len(user_df)} rows ({time() - t0:.2f}s)")
 
-    # 2) Item preprocessing
+    # --- Step 2: Merge profile_id from duration data ---
+    duration_dir = os.path.join(project_root, "clip/merged_duration")
+    if not os.path.exists(duration_dir) or not glob(os.path.join(duration_dir, "*.parquet")):
+        print("[process_infer_data] Creating merged duration parquet files...")
+        merge_parquet_files(os.path.join(project_root, "duration"), duration_dir)
+
+    profile_map_list = []
+    for f in glob(os.path.join(duration_dir, "*.parquet")):
+        try:
+            df = pd.read_parquet(f, columns=["username", "profile_id"]).drop_duplicates()
+            profile_map_list.append(df)
+        except Exception as e:
+            print(f"[Warning] Could not read {f}: {e}")
+
+    if profile_map_list:
+        profile_map_df = pd.concat(profile_map_list, ignore_index=True).drop_duplicates()
+        user_df = user_df.merge(profile_map_df, on="username", how="left")
+
+    if "profile_id" not in user_df.columns:
+        raise RuntimeError("profile_id column could not be found/merged into user_df")
+
+    # --- Step 3: Clip item preprocessing ---
     t0 = time()
     print("[process_infer_data] Loading & preprocessing clip item data...")
     clip_df = process_clip_item(clip_data_path, output_dir_path, num_clip, mode='infer').head(num_clip)
     clip_df['content_id'] = clip_df['content_id'].astype(str)
-    clip_elapsed = time() - t0
-    print(f"  ↪︎ clip preprocess done: {len(clip_df)} rows ({clip_elapsed:.2f}s)")
+    print(f"  ↪︎ clip preprocess done: {len(clip_df)} rows ({time() - t0:.2f}s)")
 
-    # 3) Save the two canonical files once
+    # Save preprocessed data once
     user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
     clip_item_path = os.path.join(output_dir, "clip_item_data.parquet")
     user_df.to_parquet(user_profile_path, index=False)
     clip_df.to_parquet(clip_item_path, index=False)
     print(f"[process_infer_data] Saved user_profile to {user_profile_path}")
     print(f"[process_infer_data] Saved clip_item to {clip_item_path}")
+    print(f"[process_infer_data] Total users: {len(user_df)}, Total clips: {len(clip_df)}, "
+          f"Estimated rows: {len(user_df) * len(clip_df):,}")
 
+    # --- Step 4: Yield chunks ---
     total_users = len(user_df)
-    total_clips = len(clip_df)
-    est_total_pairs = total_users * total_clips
-    print(f"[process_infer_data] Total users: {total_users}, Total clips: {total_clips}, Estimated rows: {est_total_pairs:,}")
+    for idx, start in enumerate(range(0, total_users, user_batch_size), start=1):
+        yield idx, user_df.iloc[start:start + user_batch_size], clip_df
 
-    # Safety advice / warn if chunk × clips huge
-    est_per_chunk = user_batch_size * total_clips
-    if est_per_chunk > max_rows_warn_threshold:
-        print(f"WARNING: user_batch_size * total_clips = {est_per_chunk:,} > {max_rows_warn_threshold:,}.")
-        print("  → Reduce user_batch_size or consider splitting clips into sub-batches.")
-
-    # 4) Yield chunks for on-the-fly processing
-    chunk_idx = 0
-    for start in range(0, total_users, user_batch_size):
-        chunk_idx += 1
-        user_chunk = user_df.iloc[start:start + user_batch_size].copy()
-        yield chunk_idx, user_chunk, clip_df
-
-    print(f"[process_infer_data] Total preprocessing time: {time() - overall_start:.2f}s")
+    print(f"[Total preprocessing time] {time() - overall_start:.2f}s")
