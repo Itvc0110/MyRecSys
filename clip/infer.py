@@ -105,15 +105,18 @@ if __name__ == "__main__":
     print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
 
     # Load model once
-
-    if torch.cuda.is_available():
-        torch.cuda.set_device(0)
-        _ = torch.randn(1).to('cuda')
-
+    expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
     checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Warm up CUDA context before inference
+    if device.type == 'cuda':
+        torch.cuda.set_device(device)
+        torch.backends.cudnn.benchmark = True  # Enable autotuner
+        # Warm-up dummy tensor on GPU with expected input dim
+        _ = torch.randn(1, expected_input_dim, device=device)
+
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
     model = DCNv3(expected_input_dim)
     model.load_state_dict(checkpoint["model_state_dict"])
 
