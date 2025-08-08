@@ -104,10 +104,14 @@ if __name__ == "__main__":
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
     print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
 
-    # Load model once
-    expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
-    checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
+    # Load model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Load checkpoint
+    checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
 
     # Warm up CUDA context before inference
     if device.type == 'cuda':
@@ -116,7 +120,7 @@ if __name__ == "__main__":
         # Warm-up dummy tensor on GPU with expected input dim
         _ = torch.randn(1, expected_input_dim, device=device)
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    # Initialize model and load weights
     model = DCNv3(expected_input_dim)
     model.load_state_dict(checkpoint["model_state_dict"])
 
