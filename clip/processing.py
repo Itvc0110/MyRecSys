@@ -99,57 +99,66 @@ def process_data(output_filepath):
     else:
         return
 
-def process_infer_data(user_data_path, clip_data_path, num_user, num_clip,
-                       user_batch_size=20):
+# processing.py  -- replace the existing process_infer_data with this
+
+def process_infer_data(user_data_path, movie_data_path, num_user, num_movie, output_dir_path,
+                       user_batch_size=20, max_rows_warn_threshold=5_000_000):
+    """
+    Preprocess user and movie data, save to two parquet files, and yield user chunks
+    together with full movie dataframe for on-the-fly inference.
+
+    Parameters:
+      user_batch_size: number of user-profile rows to process per chunk
+      max_rows_warn_threshold: warn if chunk_size * n_movies exceeds this (protect memory)
+    Yields:
+      (chunk_idx (1-based), user_chunk_df (pandas), movie_df (pandas))
+    """
+    from time import time
+    project_root = Path().resolve()
+    output_dir = os.path.join(project_root, output_dir_path)
+    os.makedirs(output_dir, exist_ok=True)
 
     overall_start = time()
-    print("[Start] process_infer_data")
 
-    project_root = Path().resolve()
-
+    # 1) User preprocessing
     t0 = time()
-    clip_df = process_clip_item(clip_data_path, None, num_clip, mode='infer')
-    clip_df['content_id'] = clip_df['content_id'].astype(str)
-    clip_pl = pl.from_pandas(clip_df)
-    print(f"[Time] Loaded clip data in {time() - t0:.2f}s")
+    print("[process_infer_data] Loading & preprocessing user data...")
+    user_df = process_user_data(user_data_path, output_dir_path, num_user, mode='infer').head(num_user)
+    user_elapsed = time() - t0
+    print(f"  ↪︎ User preprocess done: {len(user_df)} rows ({user_elapsed:.2f}s)")
 
-    t1 = time()
-    user_df = process_user_data(user_data_path, None, num_user, mode='infer')
-    user_df['username'] = user_df['username'].astype(str)
-    print(f"[Time] Loaded user data in {time() - t1:.2f}s")
+    # 2) Item preprocessing
+    t0 = time()
+    print("[process_infer_data] Loading & preprocessing movie item data...")
+    movie_df = process_movie_item(movie_data_path, output_dir_path, num_movie, mode='infer').head(num_movie)
+    movie_df['content_id'] = movie_df['content_id'].astype(str)
+    movie_elapsed = time() - t0
+    print(f"  ↪︎ Movie preprocess done: {len(movie_df)} rows ({movie_elapsed:.2f}s)")
 
-    t2 = time()
-    merged_duration_folder_path = os.path.join(project_root, "clip/merged_duration")
-    durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
+    # 3) Save the two canonical files once
+    user_profile_path = os.path.join(output_dir, "user_profile_data.parquet")
+    movie_item_path = os.path.join(output_dir, "movie_item_data.parquet")
+    user_df.to_parquet(user_profile_path, index=False)
+    movie_df.to_parquet(movie_item_path, index=False)
+    print(f"[process_infer_data] Saved user_profile to {user_profile_path}")
+    print(f"[process_infer_data] Saved movie_item to {movie_item_path}")
 
-    user_profile_list = []
-    for duration in durations:
-        try:
-            df = pd.read_parquet(duration, columns=["username", "profile_id"])
-            user_profile_list.append(df.drop_duplicates())
-        except Exception as e:
-            print(f"Error reading {duration}: {e}")
+    total_users = len(user_df)
+    total_movies = len(movie_df)
+    est_total_pairs = total_users * total_movies
+    print(f"[process_infer_data] Total users: {total_users}, Total movies: {total_movies}, Estimated rows: {est_total_pairs:,}")
 
-    if not user_profile_list:
-        raise RuntimeError("No duration data available.")
+    # Safety advice / warn if chunk × movies huge
+    est_per_chunk = user_batch_size * total_movies
+    if est_per_chunk > max_rows_warn_threshold:
+        print(f"WARNING: user_batch_size * total_movies = {est_per_chunk:,} > {max_rows_warn_threshold:,}.")
+        print("  → Reduce user_batch_size or consider splitting movies into sub-batches.")
 
-    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
-    print(f"[Time] Loaded profile info in {time() - t2:.2f}s")
+    # 4) Yield chunks for on-the-fly processing
+    chunk_idx = 0
+    for start in range(0, total_users, user_batch_size):
+        chunk_idx += 1
+        user_chunk = user_df.iloc[start:start + user_batch_size].copy()
+        yield chunk_idx, user_chunk, movie_df
 
-    t3 = time()
-    user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
-    print(f"[Time] Merged user profiles in {time() - t3:.2f}s")
-
-    total_users = len(user_profile_df)
-    print(f"Total users: {total_users}, Total clips: {len(clip_df)}")
-
-    for i in range(0, total_users, user_batch_size):
-        user_chunk = user_profile_df.iloc[i:i + user_batch_size]
-        user_pl = pl.from_pandas(user_chunk)
-
-        t_batch = time()
-        cross = user_pl.join(clip_pl, how="cross")
-        yield cross.to_pandas().fillna(0)
-        print(f"[Time] Generated cross-chunk {i // user_batch_size + 1} in {time() - t_batch:.2f}s")
-
-    print(f"[End] process_infer_data completed in {time() - overall_start:.2f}s")
+    print(f"[process_infer_data] Total preprocessing time: {time() - overall_start:.2f}s")
