@@ -73,7 +73,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
             'content_id': str,
             'content_single': str,
             'content_publish_year': 'float32',
-            # 'content_country': str,
+            'content_country': str,
             'type_id': str,
             'tag_names': str,
             'content_duration': 'float32',
