@@ -78,12 +78,12 @@ if __name__ == "__main__":
     preprocess_start = time.time()
     if not os.path.exists(processed_user_path):
         print("  ↪︎ Processing user data...")
-        process_user_data(user_data_path, output_dir="movie/infer_data", num_user=-1, mode='infer')
+        process_user_data(user_data_path, output_dir="movie/infer_data", num_user=1000, mode='infer')
     else:
         print("  ↪︎ User data already exists, skipping preprocessing.")
     if not os.path.exists(processed_item_path):
         print("  ↪︎ Processing item data...")
-        process_movie_item(movie_data_path, output_dir="movie/infer_data", num_movie=100, mode='infer')
+        process_movie_item(movie_data_path, output_dir="movie/infer_data", num_movie=-1, mode='infer')
     else:
         print("  ↪︎ Item data already exists, skipping preprocessing.")
     print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
