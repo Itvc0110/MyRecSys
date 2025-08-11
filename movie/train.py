@@ -38,15 +38,13 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
     model_path = "model/movie/best_model.pth"
     model_path = os.path.join(project_root, model_path)
 
-    # Early stopping variables
-    best_val_loss = float('inf')  # Initialize to infinity
+    best_val_loss = float('inf')  
     if os.path.exists(model_path):
         previous_model = torch.load(model_path, map_location=device)
         best_previous_loss = previous_model['loss']
     else:
         best_previous_loss = float('inf')
-    early_stop_counter = 0        # Counter for epochs without improvement
-
+    early_stop_counter = 0       
 
     for epoch in range(epochs):
         model.train()
@@ -54,7 +52,6 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
         all_y_true = []
         all_y_scores = []
 
-        # Training loop
         for batch_idx, (inputs, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}")):
             inputs = inputs.to(device)
             labels = labels.to(device)
@@ -88,17 +85,14 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
         f1_scores.append(f1)
         auc_scores.append(auc)
 
-        # Display training metrics
         print(f'Epoch {epoch + 1}/{epochs} - Training Loss: {avg_train_loss:.4f}')
         print(f'Precision: {precision:.4f}')
         print(f'Recall: {recall:.4f}')
         print(f'F1 Score: {f1:.4f}')
         print(f'AUC: {auc:.4f}')
 
-        # Compute validation loss
         val_loss = validate(model, val_loader, loss_fn, device)
 
-        # Early stopping logic
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             early_stop_counter = 0
@@ -140,15 +134,14 @@ def validate(model, val_loader, loss_fn, device):
     f1 = f1_score(all_y_true, y_pred, zero_division=0)
     auc = roc_auc_score(all_y_true, all_y_scores)
 
-    # Display validation metrics
     print(f'\nValidation Loss: {avg_val_loss:.4f}')
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')
     print(f'AUC: {auc:.4f}\n')
 
-    model.train()  # Switch back to training mode
-    return avg_val_loss  # Return validation loss for early stopping
+    model.train()  
+    return avg_val_loss  
 
 def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
     project_root = Path().resolve()
@@ -159,7 +152,7 @@ def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': loss
     }
-    torch.save(checkpoint, path)
+    torch.save(checkpoint, model_path)
     print(f"Checkpoint saved at epoch {epoch}")
 
 if __name__ == "__main__":
@@ -199,8 +192,8 @@ if __name__ == "__main__":
 
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
     val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=2048, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=2048, shuffle=False)
 
     input_dim = X_train_tensor.shape[1]
     model = DCNv3(input_dim)

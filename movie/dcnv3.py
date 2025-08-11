@@ -25,11 +25,10 @@ class ExponentialCrossNetwork(nn.Module):
         self.w = nn.ModuleList()
         self.b = nn.ParameterList()
         
-        # Compute split size
+        # compute split size
         self.input_dim = input_dim
         self.half = input_dim // 2
 
-        # Initialize layers
         for i in range(num_cross_layers):
             w_layer = nn.Linear(input_dim, self.half, bias=False).to(self.device)
             self.w.append(w_layer)
@@ -55,7 +54,6 @@ class ExponentialCrossNetwork(nn.Module):
             torch.nn.init.xavier_uniform_(module.weight)
 
     def forward(self, x):
-        # Ensure input is on the correct device
         x = x.to(self.device)
         x0 = x
 
@@ -69,7 +67,7 @@ class ExponentialCrossNetwork(nn.Module):
                 mask = self.masker(norm_H)
             else:
                 mask = self.masker(H)
-            # Concatenate and pad if necessary
+            # concatenate and pad if necessary
             H = torch.cat([H, H * mask], dim=-1)
 
             if H.shape[-1] != self.input_dim:
@@ -102,11 +100,10 @@ class LinearCrossNetwork(nn.Module):
         self.w = nn.ModuleList()
         self.b = nn.ParameterList()
         
-        # Compute split size
+        # compute split size
         self.input_dim = input_dim
         self.half = input_dim // 2
         
-        # Initialize layers
         for i in range(num_cross_layers):
             w_layer = nn.Linear(input_dim, self.half, bias=False).to(self.device)
             self.w.append(w_layer)
@@ -133,7 +130,6 @@ class LinearCrossNetwork(nn.Module):
             torch.nn.init.xavier_uniform_(module.weight)
 
     def forward(self, x):
-        # Ensure input is on the correct device
         x = x.to(self.device)
         x0 = x
 
@@ -148,7 +144,7 @@ class LinearCrossNetwork(nn.Module):
             else:
                 mask = self.masker(H)
 
-            # Concatenate and pad if necessary
+            # concatenate and pad if necessary
             H = torch.cat([H, H * mask], dim=-1)
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
@@ -179,10 +175,8 @@ class DCNv3(nn.Module):
                  batch_norm=False,
                  num_heads=1):
         super(DCNv3, self).__init__()
-        # Move device initialization to the beginning
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # Initialize networks with device placement
         self.ECN = ExponentialCrossNetwork(
             input_dim=input_dim,
             num_cross_layers=num_deep_cross_layers,
@@ -213,7 +207,6 @@ class DCNv3(nn.Module):
             torch.nn.init.xavier_uniform_(module.weight)
 
     def forward(self, inputs):
-        # Ensure inputs are on the correct device
         inputs = inputs.to(self.device)
         
         feature_emb = inputs
@@ -252,23 +245,22 @@ class Weighted_TriBCE_Loss(nn.Module):
         self.pos_weight = pos_weight
 
     def forward(self, y_pred, y_true, y_d, y_s):
-        # Compute sample weights based on true labels
         sample_weight = torch.where(y_true == 1, self.pos_weight, 1.0)
         
-        # Define BCE loss with sample weights
+        # define BCE loss with sample weights
         bce_loss = nn.BCELoss(weight=sample_weight)
         
-        # Compute losses
+        # compute losses
         loss = bce_loss(y_pred, y_true)
         loss_d = bce_loss(y_d, y_true)
         loss_s = bce_loss(y_s, y_true)
         
-        # Compute weights for deep and shallow losses
+        # compute weights for deep and shallow losses
         weight_d = loss_d - loss
         weight_s = loss_s - loss
         weight_d = torch.where(weight_d > 0, weight_d, torch.zeros_like(weight_d))
         weight_s = torch.where(weight_s > 0, weight_s, torch.zeros_like(weight_s))
         
-        # Combine losses
+        # combine losses
         loss = loss + loss_d * weight_d + loss_s * weight_s
         return loss

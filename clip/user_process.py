@@ -52,12 +52,11 @@ def process_user_data(data_path, output_dir, num_user=-1, mode='train'):
     user_data = user_data[user_data['birthday'].str.isdigit()]
     user_data['birthday'] = user_data['birthday'].str[:4].astype(int)
     user_data = user_data.drop(columns=["tentinh"])
-    user_data = user_data.drop(columns=["province"]) #try
+    user_data = user_data.drop(columns=["province"]) 
     user_data['sex'] = user_data['sex'].astype(int)
     user_data['sex'] = user_data['sex'].apply(lambda x: x if x in [0, 1] else 1)
 
-    cat_cols = [#"province",
-                "package_code"]
+    cat_cols = ["package_code"]
     cont_cols = ["birthday"]
 
     if mode == 'train':

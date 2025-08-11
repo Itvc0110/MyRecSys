@@ -15,7 +15,6 @@ def split_categories(x):
     return str(x).split(',')
 
 def merge_content_clips(clip_data_path, output_file):
-    # unchanged from original…
     clip_files = glob.glob(f'{clip_data_path}/**/content_clip_*.json', recursive=True)
     all_data = []
     for f in clip_files:
@@ -62,7 +61,6 @@ def transform_item_data(data, single_cols, mlb_col, cont_cols):
     return pd.concat([data, ohe_df, mlb_df, scaled_df], axis=1)
 
 def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
-    # Load or merge raw clip data
     project_root = Path().resolve()
     full_output_dir = project_root / output_dir
     full_output_dir.mkdir(parents=True, exist_ok=True)
@@ -79,7 +77,6 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
             'tag_names': str,
             'content_duration': 'float32',
             'content_status': str,
-            #'locked_level': str,
             'VOD_CODE': str,
             'content_cate_id': str,
         }
@@ -92,29 +89,26 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
     clip_df["content_publish_year"] = pd.to_numeric(clip_df["content_publish_year"].astype(str).str[:4], errors='coerce')
     clip_df["content_publish_year"] = clip_df["content_publish_year"].fillna(clip_df["content_publish_year"].mean())
 
-    # Keep only needed columns
     cols = ['content_id','content_publish_year', 
             #'content_country',
             'type_id','tag_names','content_duration','content_status',
-            #'locked_level',
             'VOD_CODE','content_cate_id']
     clip_df = clip_df[cols]
 
-    # Encoder setup
-    single_cols = [#"content_country", 
-                   #"locked_level", 
+    # encoder
+    single_cols = [#"content_country",
                    "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
     cont_cols = ["content_publish_year"]
 
-    # Train mode: fit and save encoder
+    # train mode
     if mode == 'train':
         fit_item_encoder(clip_df, single_cols, mlb_col, cont_cols)
 
-    # Transform with saved encoder
+    # transform
     clip_df = transform_item_data(clip_df, single_cols, mlb_col, cont_cols)
 
-    # Slice clip data if needed
+    # filter with content_status and drop those with not suitable tag_names
     if num_clip != -1:
         clip_df = (clip_df[(clip_df['content_status'] == "1") & (clip_df['tag_names'].str.contains(r'\w', na=False))]
                     .head(num_clip)
@@ -122,7 +116,7 @@ def process_clip_item(clip_data_path, output_dir, num_clip=-1, mode='train'):
 
     if 'tag_names' in clip_df.columns:
         clip_df = clip_df.drop('tag_names', axis=1)
-    # Save final output
+    # save final output
     clip_df.to_parquet(full_output_dir / "clip_item_data.parquet", index=False)
 
     return clip_df

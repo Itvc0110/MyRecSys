@@ -15,7 +15,6 @@ def split_categories(x):
     return str(x).split(',')
 
 def merge_content_movies(movie_data_path, output_file):
-    # unchanged from original…
     movie_files = glob.glob(f'{movie_data_path}/**/content_movie_*.json', recursive=True)
     all_data = []
     for f in movie_files:
@@ -29,7 +28,7 @@ def merge_content_movies(movie_data_path, output_file):
     df.to_parquet(output_file, index=False)
     return df
 
-def fit_item_encoder(data, single_cols, mlb_col,cont_cols):
+def fit_item_encoder(data, single_cols, mlb_col, cont_cols):
     ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
     ohe.fit(data[single_cols])
     joblib.dump(ohe, Path("model/movie/encoder/item_ohe_single.joblib"))
@@ -62,7 +61,6 @@ def transform_item_data(data, single_cols, mlb_col, cont_cols):
     return pd.concat([data, ohe_df, mlb_df, scaled_df], axis=1)
 
 def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
-    # Load or merge raw movie data
     project_root = Path().resolve()
     full_output_dir = project_root / output_dir
     full_output_dir.mkdir(parents=True, exist_ok=True)
@@ -75,12 +73,11 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
             'content_id': str,
             'content_single': str,
             'content_publish_year': 'float32',
-            #'content_country': str,
+            # 'content_country': str,
             'type_id': str,
             'tag_names': str,
             'content_duration': 'float32',
             'content_status': str,
-            # 'locked_level': str,
             'VOD_CODE': str,
             'content_cate_id': str,
         }
@@ -93,29 +90,26 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     movie_df["content_publish_year"] = pd.to_numeric(movie_df["content_publish_year"].astype(str).str[:4], errors='coerce')
     movie_df["content_publish_year"] = movie_df["content_publish_year"].fillna(movie_df["content_publish_year"].mean())
 
-    # Keep only needed columns
-    cols = ['content_id','content_single','content_publish_year',
+    cols = ['content_id','content_single','content_publish_year', 
             #'content_country',
             'type_id','tag_names','content_duration','content_status',
-            #'locked_level',
             'VOD_CODE','content_cate_id']
     movie_df = movie_df[cols]
 
-    # Encoder setup
+    # encoder
     single_cols = [#"content_country",
-                    #"locked_level", 
                    "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
     cont_cols = ["content_publish_year"]
 
-    # Train mode: fit and save encoder
+    # train mode
     if mode == 'train':
         fit_item_encoder(movie_df, single_cols, mlb_col, cont_cols)
 
-    # Transform with saved encoder
+    # transform
     movie_df = transform_item_data(movie_df, single_cols, mlb_col, cont_cols)
 
-    # Slice movie data if needed
+    # filter with content_status and drop those with not suitable tag_names
     if num_movie != -1:
         movie_df = (movie_df[(movie_df['content_status'] == "1") & (movie_df['tag_names'].str.contains(r'\w', na=False))]
                     .head(num_movie)
@@ -123,7 +117,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
 
     if 'tag_names' in movie_df.columns:
         movie_df = movie_df.drop('tag_names', axis=1)
-    # Save final output
+    # save final output
     movie_df.to_parquet(full_output_dir / "movie_item_data.parquet", index=False)
 
     return movie_df

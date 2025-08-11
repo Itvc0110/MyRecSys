@@ -61,7 +61,7 @@ if __name__ == "__main__":
     os.makedirs(project_root / "clip" / "result", exist_ok=True)
     os.makedirs(project_root / "clip" / "infer_data", exist_ok=True)
 
-    # File paths
+    # path
     user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
     clip_data_path = os.path.join(project_root, "mytv_vmp_content")
     processed_user_path = os.path.join(project_root, "clip/infer_data/user_data.parquet")
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
     rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
-    # Preprocess
+    # preprocess
     print("Preprocessing user and item data...")
     preprocess_start = time.time()
     if not os.path.exists(processed_user_path):
@@ -88,12 +88,12 @@ if __name__ == "__main__":
         print("  ↪︎ Item data already exists, skipping preprocessing.")
     print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
 
-    # Load data
+    # load data
     print("\nLoading user and item data...")
     user_df = pd.read_parquet(processed_user_path)
     clip_df = pd.read_parquet(processed_item_path)
 
-    # Duration mapping
+    # duration mapping 
     duration_dir = os.path.join(project_root, "clip/merged_duration")
     durations = glob.glob(os.path.join(duration_dir, "*.parquet"))
     user_profile_list = []
@@ -104,9 +104,9 @@ if __name__ == "__main__":
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
     print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
 
-    # Load model
+    # load model checkpoint
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # Load checkpoint
+
     checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
     checkpoint = torch.load(checkpoint_path, map_location=device)
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
@@ -114,14 +114,12 @@ if __name__ == "__main__":
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
 
-    # Load clip_pl once
+    # load clip_pl once
     clip_pl = pl.from_pandas(clip_df)
-
-    # Print total contents
     total_contents = clip_pl.height
     print(f"\nTotal unique contents: {total_contents:,}")
 
-    # Load content metadata
+    # load content metadata
     content_clip_pl = pl.read_parquet(content_clip_path)
     content_unique = (
         content_clip_pl
@@ -130,7 +128,7 @@ if __name__ == "__main__":
     )
     content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
 
-    # Process in chunks
+    # process in chunks
     user_batch_size = 10
     num_users = len(user_profile_df)
     num_chunks = ceil(num_users / user_batch_size)
@@ -141,17 +139,17 @@ if __name__ == "__main__":
         chunk_start = time.time()
         print(f"[Chunk {i+1}/{num_chunks}] Processing...")
 
-        # User chunk
+        # user chunk
         start_idx = i * user_batch_size
         end_idx = min((i+1) * user_batch_size, num_users)
         user_chunk = user_profile_df.iloc[start_idx:end_idx]
 
-        # Cross join in Polars
+        # cross join in Polars
         cross_start = time.time()
         user_chunk_pl = pl.from_pandas(user_chunk)
         cross_df = user_chunk_pl.join(clip_pl, how="cross")
 
-        # Separate features & IDs in Polars
+        # separate features/IDs in Polars
         exclude = {"username", "content_id", "profile_id"}
         to_convert = [col for col in cross_df.columns if col not in exclude]
         cross_df = cross_df.cast({col: pl.Float32 for col in to_convert})
@@ -160,7 +158,7 @@ if __name__ == "__main__":
         features_np = cross_df.select(to_convert).to_numpy()
         print(f"  ↪︎ Cross join: {time.time()-cross_start:.2f} seconds")
 
-        # Inference
+        # inference
         infer_start = time.time()
         infer_tensor = torch.tensor(features_np, dtype=torch.float32)
         infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=4096, shuffle=False)
@@ -168,7 +166,7 @@ if __name__ == "__main__":
         total_pairs += len(predictions)
         print(f"  ↪︎ Inference: {time.time()-infer_start:.2f} seconds")
 
-        # Collect top N
+        # collect top N
         collect_start = time.time()
         chunk_result = {}
         temp_dict = {}
@@ -197,20 +195,20 @@ if __name__ == "__main__":
             }
         print(f"  ↪︎ Collect top {TOP_N}: {time.time()-collect_start:.2f} seconds")
 
-        # Add metadata
+        # add metadata
         for pid, pdata in chunk_result.items():
             for cid, cdata in pdata['suggested_content'].items():
                 meta = content_dict.get(cid)
                 if meta:
                     cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
 
-        # Rank + rule
+        # rank + rule
         rank_start = time.time()
         reordered_chunk = rank_result(chunk_result, TOP_N)
         result_with_rule = get_rulename(reordered_chunk, rule_info_path, tags_path)
         print(f"  ↪︎ Ranking & rule assignment: {time.time()-rank_start:.2f} seconds")
 
-        # Save per-chunk
+        # save per-chunk
         save_start = time.time()
         homepage_rule = []
         rule_content = ""
@@ -234,13 +232,13 @@ if __name__ == "__main__":
             f.write(rule_content)
         print(f"  ↪︎ Saved chunk files in {time.time()-save_start:.2f} seconds")
 
-        # Cleanup aggressively
+        # cleanup
         del predictions, temp_dict, chunk_result, cross_df, features_np, infer_tensor, infer_loader
         torch.cuda.empty_cache()
         gc.collect()
         print(f"  ↪︎ Total chunk time: {time.time()-chunk_start:.2f} seconds\n")
 
-    # Merge per-chunk files
+    # merge per-chunk files
     merge_start = time.time()
     final_result = {}
     final_rulename = []
