@@ -14,8 +14,7 @@ class ExponentialCrossNetwork(nn.Module):
                  num_cross_layers=3,
                  layer_norm=True,
                  batch_norm=False,
-                 net_dropout=0.1,
-                 num_heads=1):
+                 net_dropout=0.1):
         super(ExponentialCrossNetwork, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.num_cross_layers = num_cross_layers
@@ -36,7 +35,7 @@ class ExponentialCrossNetwork(nn.Module):
             if layer_norm:
                 self.layer_norm.append(nn.LayerNorm(self.half).to(self.device))
             if batch_norm:
-                self.batch_norm.append(nn.BatchNorm1d(num_heads).to(self.device))
+                self.batch_norm.append(nn.BatchNorm1d(self.half).to(self.device))
             if net_dropout > 0:
                 self.dropout.append(nn.Dropout(net_dropout).to(self.device))
             nn.init.uniform_(self.b[i].data)
@@ -89,8 +88,7 @@ class LinearCrossNetwork(nn.Module):
                  num_cross_layers=3,
                  layer_norm=True,
                  batch_norm=True,
-                 net_dropout=0.1,
-                 num_heads=1):
+                 net_dropout=0.1):
         super(LinearCrossNetwork, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.num_cross_layers = num_cross_layers
@@ -112,7 +110,7 @@ class LinearCrossNetwork(nn.Module):
             if layer_norm:
                 self.layer_norm.append(nn.LayerNorm(self.half).to(self.device))
             if batch_norm:
-                self.batch_norm.append(nn.BatchNorm1d(num_heads).to(self.device))
+                self.batch_norm.append(nn.BatchNorm1d(self.half).to(self.device))
             if net_dropout > 0:
                 self.dropout.append(nn.Dropout(net_dropout).to(self.device))
             nn.init.uniform_(self.b[i].data)
@@ -164,16 +162,12 @@ class LinearCrossNetwork(nn.Module):
 class DCNv3(nn.Module):
     def __init__(self,
                  input_dim,
-                 gpu=-1,
-                 learning_rate=1e-3,
-                 embedding_dim=10,
                  num_deep_cross_layers=3,
                  num_shallow_cross_layers=3,
                  deep_net_dropout=0.05,
                  shallow_net_dropout=0.05,
                  layer_norm=True,
-                 batch_norm=True,
-                 num_heads=2):
+                 batch_norm=True):
         super(DCNv3, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
@@ -182,8 +176,7 @@ class DCNv3(nn.Module):
             num_cross_layers=num_deep_cross_layers,
             net_dropout=deep_net_dropout,
             layer_norm=layer_norm,
-            batch_norm=batch_norm,
-            num_heads=num_heads
+            batch_norm=batch_norm
         ).to(self.device)
         
         self.LCN = LinearCrossNetwork(
@@ -191,8 +184,7 @@ class DCNv3(nn.Module):
             num_cross_layers=num_shallow_cross_layers,
             net_dropout=shallow_net_dropout,
             layer_norm=layer_norm,
-            batch_norm=batch_norm,
-            num_heads=num_heads
+            batch_norm=batch_norm
         ).to(self.device)
         
         self.apply(self._init_weights)
