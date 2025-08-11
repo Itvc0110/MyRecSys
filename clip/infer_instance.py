@@ -18,7 +18,7 @@ from dcnv3 import DCNv3
 from rule_process import get_rulename
 from user_process import process_user_data
 from item_process import process_clip_item
-from processing import process_infer_data  # new centralized prep
+from processing_instant import process_infer_data  
 
 def rank_result(data, n):
     reordered_data = {}
