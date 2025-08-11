@@ -45,7 +45,7 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
         best_previous_loss = previous_model['loss']
     else:
         best_previous_loss = float('inf')
-    early_stop_counter = 0        # Counter for epochs without improvement
+    early_stop_counter = 0       
 
 
     for epoch in range(epochs):
@@ -147,8 +147,8 @@ def validate(model, val_loader, loss_fn, device):
     print(f'F1 Score: {f1:.4f}')
     print(f'AUC: {auc:.4f}\n')
 
-    model.train()  # Switch back to training mode
-    return avg_val_loss  # Return validation loss for early stopping
+    model.train()  
+    return avg_val_loss  
 
 def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
     project_root = Path().resolve()
@@ -159,7 +159,7 @@ def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': loss
     }
-    torch.save(checkpoint, path)
+    torch.save(checkpoint, model_path)
     print(f"Checkpoint saved at epoch {epoch}")
 
 if __name__ == "__main__":

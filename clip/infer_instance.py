@@ -1,3 +1,5 @@
+# infer.py (replace your current script with this cleaned version)
+
 import os
 import pandas as pd
 import polars as pl
@@ -9,12 +11,14 @@ import time
 from pathlib import Path
 import glob
 from math import ceil
+import re
 
 from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3
 from rule_process import get_rulename
 from user_process import process_user_data
 from item_process import process_clip_item
+from processing import process_infer_data  # new centralized prep
 
 def rank_result(data, n):
     reordered_data = {}
@@ -42,16 +46,23 @@ def rank_result(data, n):
         }
     return reordered_data
 
-def infer(model, data, device):
+def infer(model, data_loader, device):
     model.eval()
     predictions = []
     with torch.no_grad():
-        for batch in tqdm(data, desc="Inference"):
+        for batch in tqdm(data_loader, desc="Inference"):
             inputs = batch[0].to(device)
             outputs = model(inputs)
             predictions.extend(outputs['y_pred'].detach().cpu().numpy())
         torch.cuda.empty_cache()
     return predictions
+
+def _parse_part_index(path):
+    m = re.search(r'part_(\d+)\.parquet$', path)
+    if m:
+        return int(m.group(1))
+    # fallback: use enumeration ordering
+    return None
 
 if __name__ == "__main__":
     start_time = time.time()
@@ -73,7 +84,7 @@ if __name__ == "__main__":
     rulename_json_path = os.path.join(project_root, "clip/result/rulename.json")
     rule_content_path = os.path.join(project_root, "clip/result/rule_content.txt")
 
-    # Preprocess
+    # Preprocess user/item if needed (keeps your original flow)
     print("Preprocessing user and item data...")
     preprocess_start = time.time()
     if not os.path.exists(processed_user_path):
@@ -88,41 +99,29 @@ if __name__ == "__main__":
         print("  ↪︎ Item data already exists, skipping preprocessing.")
     print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
 
-    # Load data
+    # Load preprocessed small tables (still useful)
     print("\nLoading user and item data...")
     user_df = pd.read_parquet(processed_user_path)
     clip_df = pd.read_parquet(processed_item_path)
 
-    # Duration mapping
-    duration_dir = os.path.join(project_root, "clip/merged_duration")
-    durations = glob.glob(os.path.join(duration_dir, "*.parquet"))
-    user_profile_list = []
-    for duration in durations:
-        df = pd.read_parquet(duration, columns=["username", "profile_id"])
-        user_profile_list.append(df.drop_duplicates())
-    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
-    user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
-    print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
+    # Build (or reuse) prebuilt cross-join parts
+    infer_prep_start = time.time()
+    infer_prep = process_infer_data(user_df, clip_df,
+                                    num_user=-1, num_clip=-1,
+                                    output_dir_path="clip/infer_data",
+                                    user_batch_size=10,
+                                    force_rebuild=False)  # set True to force rebuild
+    infer_files = infer_prep["infer_files"]
+    user_profile_path = infer_prep["user_profile_path"]
+    print(f"Prepared {len(infer_files)} infer part files in {time.time()-infer_prep_start:.2f} seconds")
 
-    # Load model
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # Load checkpoint
-    checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
-    model = DCNv3(expected_input_dim)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.to(device)
+    # Load content metadata once
+    try:
+        content_clip_pl = pl.read_parquet(content_clip_path)
+    except FileNotFoundError:
+        print(f"Error: Content metadata not found at {content_clip_path}")
+        raise
 
-    # Load clip_pl once
-    clip_pl = pl.from_pandas(clip_df)
-
-    # Print total contents
-    total_contents = clip_pl.height
-    print(f"\nTotal unique contents: {total_contents:,}")
-
-    # Load content metadata
-    content_clip_pl = pl.read_parquet(content_clip_path)
     content_unique = (
         content_clip_pl
         .unique(subset=['content_id'])
@@ -130,57 +129,78 @@ if __name__ == "__main__":
     )
     content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
 
-    # Process in chunks
-    user_batch_size = 10
-    num_users = len(user_profile_df)
-    num_chunks = ceil(num_users / user_batch_size)
+    # Load model + warm-up
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    checkpoint_path = os.path.join(project_root, "model/clip/best_model.pth")
+    checkpoint = torch.load(checkpoint_path, map_location=device)  # load to CPU first
+    expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
+
+    model = DCNv3(expected_input_dim)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+
+    # warm-up single forward pass to initialize CUDA context
+    if device.type == 'cuda':
+        model.eval()
+        with torch.no_grad():
+            warm = torch.randn(1, expected_input_dim, device=device)
+            _ = model(warm)
+
+    # iterate prebuilt part files and infer
     total_pairs = 0
+    num_parts = len(infer_files)
+    print(f"\nProcessing {num_parts} parts...")
 
-    print(f"\nProcessing {num_users} users in {num_chunks} chunks...")
-    for i in range(num_chunks):
+    for part_idx, part_file in enumerate(sorted(infer_files, key=lambda p: (_parse_part_index(p) or 0))):
         chunk_start = time.time()
-        print(f"[Chunk {i+1}/{num_chunks}] Processing...")
+        print(f"[Part {part_idx+1}/{num_parts}] {os.path.basename(part_file)}")
 
-        # User chunk
-        start_idx = i * user_batch_size
-        end_idx = min((i+1) * user_batch_size, num_users)
-        user_chunk = user_profile_df.iloc[start_idx:end_idx]
+        # read part (polars)
+        read_start = time.time()
+        cross_df = pl.read_parquet(part_file)
+        print(f"  ↪︎ Read part: {time.time()-read_start:.2f} seconds")
 
-        # Cross join in Polars
-        cross_start = time.time()
-        user_chunk_pl = pl.from_pandas(user_chunk)
-        cross_df = user_chunk_pl.join(clip_pl, how="cross")
-
-        # Separate features & IDs in Polars
+        # prepare features (keep as polars until to_numpy)
         exclude = {"username", "content_id", "profile_id"}
-        to_convert = [col for col in cross_df.columns if col not in exclude]
-        cross_df = cross_df.cast({col: pl.Float32 for col in to_convert})
+        to_convert = [c for c in cross_df.columns if c not in exclude]
+        if not to_convert:
+            print("  ↪︎ No feature columns found in part, skipping.")
+            continue
 
+        # cast numeric features to float32
+        cast_map = {col: pl.Float32 for col in to_convert}
+        cross_df = cross_df.cast(cast_map)
+
+        # extract ids and features
         interaction_df = cross_df.select(["username", "content_id", "profile_id"]).to_pandas()
         features_np = cross_df.select(to_convert).to_numpy()
-        print(f"  ↪︎ Cross join: {time.time()-cross_start:.2f} seconds")
 
         # Inference
         infer_start = time.time()
         infer_tensor = torch.tensor(features_np, dtype=torch.float32)
-        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=4096, shuffle=False)
+        infer_loader = DataLoader(TensorDataset(infer_tensor), batch_size=2048, shuffle=False)
         predictions = infer(model, infer_loader, device)
         total_pairs += len(predictions)
         print(f"  ↪︎ Inference: {time.time()-infer_start:.2f} seconds")
 
-        # Collect top N
+        # Collect top N per profile in this part
         collect_start = time.time()
-        chunk_result = {}
         temp_dict = {}
         for pid, user, cid, score in zip(
-            interaction_df['profile_id'],
-            interaction_df['username'],
-            interaction_df['content_id'],
-            predictions
+                interaction_df['profile_id'],
+                interaction_df['username'],
+                interaction_df['content_id'],
+                predictions
         ):
             temp_dict.setdefault(pid, []).append((cid, float(score)))
-        for pid in temp_dict:
-            sorted_items = sorted(temp_dict[pid], key=lambda x: x[1], reverse=True)[:TOP_N]
+
+        chunk_result = {}
+        # create mapping username quickly from user_profile_data if needed
+        # but we have username in interaction_df; we will reuse user_profile_df from first row
+        for pid, items in temp_dict.items():
+            sorted_items = sorted(items, key=lambda x: x[1], reverse=True)[:TOP_N]
+            # username - try to get from the interaction_df (first occurrence)
+            username = interaction_df.loc[interaction_df['profile_id'] == pid, 'username'].iloc[0]
             chunk_result[pid] = {
                 'suggested_content': {
                     cid: {
@@ -191,26 +211,28 @@ if __name__ == "__main__":
                     } for cid, score in sorted_items
                 },
                 'user': {
-                    'username': user_profile_df.loc[user_profile_df['profile_id'] == pid, 'username'].iloc[0],
+                    'username': username,
                     'profile_id': pid
                 }
             }
         print(f"  ↪︎ Collect top {TOP_N}: {time.time()-collect_start:.2f} seconds")
 
         # Add metadata
+        meta_start = time.time()
         for pid, pdata in chunk_result.items():
             for cid, cdata in pdata['suggested_content'].items():
                 meta = content_dict.get(cid)
                 if meta:
                     cdata['content_name'], cdata['tag_names'], cdata['type_id'] = map(str, meta)
+        print(f"  ↪︎ Add metadata: {time.time()-meta_start:.2f} seconds")
 
-        # Rank + rule
+        # Rank & rule assignment
         rank_start = time.time()
         reordered_chunk = rank_result(chunk_result, TOP_N)
         result_with_rule = get_rulename(reordered_chunk, rule_info_path, tags_path)
         print(f"  ↪︎ Ranking & rule assignment: {time.time()-rank_start:.2f} seconds")
 
-        # Save per-chunk
+        # Save per-chunk outputs
         save_start = time.time()
         homepage_rule = []
         rule_content = ""
@@ -226,11 +248,13 @@ if __name__ == "__main__":
             rulename_json_file['d'] = ','.join(rulename_json_file['d'])
             homepage_rule.append(rulename_json_file)
 
-        with open(project_root / f"clip/result/result_chunk_{i+1}.json", 'w', encoding='utf-8') as f:
+        base_idx = _parse_part_index(part_file)
+        out_idx = base_idx if base_idx is not None else (part_idx + 1)
+        with open(project_root / f"clip/result/result_chunk_{out_idx}.json", 'w', encoding='utf-8') as f:
             json.dump(result_with_rule, f, indent=4, ensure_ascii=False)
-        with open(project_root / f"clip/result/rulename_chunk_{i+1}.json", 'w', encoding='utf-8') as f:
+        with open(project_root / f"clip/result/rulename_chunk_{out_idx}.json", 'w', encoding='utf-8') as f:
             json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
-        with open(project_root / f"clip/result/rule_content_chunk_{i+1}.txt", "w", encoding='utf-8') as f:
+        with open(project_root / f"clip/result/rule_content_chunk_{out_idx}.txt", "w", encoding='utf-8') as f:
             f.write(rule_content)
         print(f"  ↪︎ Saved chunk files in {time.time()-save_start:.2f} seconds")
 
@@ -238,19 +262,24 @@ if __name__ == "__main__":
         del predictions, temp_dict, chunk_result, cross_df, features_np, infer_tensor, infer_loader
         torch.cuda.empty_cache()
         gc.collect()
-        print(f"  ↪︎ Total chunk time: {time.time()-chunk_start:.2f} seconds\n")
+        print(f"  ↪︎ Total part time: {time.time()-chunk_start:.2f} seconds\n")
 
-    # Merge per-chunk files
+    # Merge per-chunk files (post-step)
     merge_start = time.time()
     final_result = {}
     final_rulename = []
     final_rule_content = ""
-    for i in range(num_chunks):
-        with open(project_root / f"clip/result/result_chunk_{i+1}.json", 'r', encoding='utf-8') as f:
+    chunk_files = sorted(glob.glob(str(project_root / "clip" / "result" / "result_chunk_*.json")))
+    for fpath in chunk_files:
+        with open(fpath, 'r', encoding='utf-8') as f:
             final_result.update(json.load(f))
-        with open(project_root / f"clip/result/rulename_chunk_{i+1}.json", 'r', encoding='utf-8') as f:
+    rulename_files = sorted(glob.glob(str(project_root / "clip" / "result" / "rulename_chunk_*.json")))
+    for fpath in rulename_files:
+        with open(fpath, 'r', encoding='utf-8') as f:
             final_rulename.extend(json.load(f))
-        with open(project_root / f"clip/result/rule_content_chunk_{i+1}.txt", 'r', encoding='utf-8') as f:
+    rule_content_files = sorted(glob.glob(str(project_root / "clip" / "result" / "rule_content_chunk_*.txt")))
+    for fpath in rule_content_files:
+        with open(fpath, 'r', encoding='utf-8') as f:
             final_rule_content += f.read()
 
     with open(result_json_path, 'w', encoding='utf-8') as f:
