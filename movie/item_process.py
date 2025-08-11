@@ -91,13 +91,13 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     movie_df["content_publish_year"] = movie_df["content_publish_year"].fillna(movie_df["content_publish_year"].mean())
 
     cols = ['content_id','content_single','content_publish_year', 
-            #'content_country',
+            'content_country',
             'type_id','tag_names','content_duration','content_status',
             'VOD_CODE','content_cate_id']
     movie_df = movie_df[cols]
 
     # encoder
-    single_cols = [#"content_country",
+    single_cols = ["content_country",
                    "VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
     cont_cols = ["content_publish_year"]

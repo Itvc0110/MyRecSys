@@ -83,7 +83,7 @@ if __name__ == "__main__":
         print("  ↪︎ User data already exists, skipping preprocessing.")
     if not os.path.exists(processed_item_path):
         print("  ↪︎ Processing item data...")
-        process_movie_item(movie_data_path, output_dir="movie/infer_data", num_movie=-1, mode='infer')
+        process_movie_item(movie_data_path, output_dir="movie/infer_data", num_movie=100, mode='infer')
     else:
         print("  ↪︎ Item data already exists, skipping preprocessing.")
     print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
 
     # process in chunks
-    user_batch_size = 10
+    user_batch_size = 50
     num_users = len(user_profile_df)
     num_chunks = ceil(num_users / user_batch_size)
     total_pairs = 0
