@@ -167,13 +167,13 @@ class DCNv3(nn.Module):
                  gpu=-1,
                  learning_rate=1e-3,
                  embedding_dim=10,
-                 num_deep_cross_layers=1,
-                 num_shallow_cross_layers=1,
-                 deep_net_dropout=0.1,
-                 shallow_net_dropout=0.1,
+                 num_deep_cross_layers=3,
+                 num_shallow_cross_layers=3,
+                 deep_net_dropout=0.05,
+                 shallow_net_dropout=0.05,
                  layer_norm=True,
-                 batch_norm=False,
-                 num_heads=1):
+                 batch_norm=True,
+                 num_heads=2):
         super(DCNv3, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         

@@ -174,7 +174,7 @@ if __name__ == "__main__":
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
     raw_root = (len(y) - y.sum()) / y.sum()
-    pos_weight = math.sqrt(raw_root)
+    pos_weight = raw_root
 
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
