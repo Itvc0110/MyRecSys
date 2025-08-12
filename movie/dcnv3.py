@@ -57,27 +57,30 @@ class ExponentialCrossNetwork(nn.Module):
         x0 = x
 
         for i in range(self.num_cross_layers):
-            H = self.w[i](x)
+            H = self.w[i](x)  
 
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
             if len(self.layer_norm) > i:
-                norm_H = self.layer_norm[i](H)
-                mask = self.masker(norm_H)
-            else:
-                mask = self.masker(H)
-            # concatenate and pad if necessary
-            H = torch.cat([H, H * mask], dim=-1)
+                H = self.layer_norm[i](H)
+
+            mask = self.masker(H)
+
+            H = torch.cat([H, H * mask], dim=-1) 
 
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
                 pad = H.new_zeros(H.size(0), pad_size)
                 H = torch.cat([H, pad], dim=-1)
+
             x = x0 * (H + self.b[i]) + x
+
             x = torch.clamp(x, min=-100, max=100)
             x = x / (torch.norm(x, p=2, dim=-1, keepdim=True) + 1e-12)
+
             if len(self.dropout) > i:
                 x = self.dropout[i](x)
+
         logit = self.dfc(x)
         return logit
 
@@ -132,29 +135,36 @@ class LinearCrossNetwork(nn.Module):
         x0 = x
 
         for i in range(self.num_cross_layers):
-            H = self.w[i](x)
-    
+            # Project down to half-dim
+            H = self.w[i](x)  # (batch, self.half)
+
+            # Apply BatchNorm to half-dim BEFORE concatenation
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
-            if len(self.layer_norm) > i:
-                norm_H = self.layer_norm[i](H)
-                mask = self.masker(norm_H)
-            else:
-                mask = self.masker(H)
 
-            # concatenate and pad if necessary
+            # Apply LayerNorm if present
+            if len(self.layer_norm) > i:
+                H = self.layer_norm[i](H)
+
+            mask = self.masker(H)
+
+            # Concatenate and pad
             H = torch.cat([H, H * mask], dim=-1)
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
                 pad = H.new_zeros(H.size(0), pad_size)
                 H = torch.cat([H, pad], dim=-1)
 
+            # Cross operation
             x = x0 * (H + self.b[i]) + x
+
+            # Stabilize
             x = torch.clamp(x, min=-100, max=100)
             x = x / (torch.norm(x, p=2, dim=-1, keepdim=True) + 1e-12)
+
             if len(self.dropout) > i:
                 x = self.dropout[i](x)
-                
+
         logit = self.sfc(x)
         return logit
 
