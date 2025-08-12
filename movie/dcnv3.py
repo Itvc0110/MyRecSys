@@ -209,7 +209,7 @@ class DCNv3(nn.Module):
         
         feature_emb = inputs
         dlogit = self.ECN(feature_emb).mean(dim=1)
-        logit = self.LCN(feature_emb).mean(dim=1)
+        slogit = self.LCN(feature_emb).mean(dim=1)
         logit = (dlogit + slogit) * 0.5
     
         y_pred = self.output_activation(logit)
