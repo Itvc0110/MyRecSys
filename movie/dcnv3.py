@@ -274,9 +274,9 @@ class TriBCE_Loss(nn.Module):
         self.bce_loss = nn.BCELoss()
 
     def forward(self, y_pred, y_true, y_d, y_s):
-        loss = self.bce_loss(y_pred, y_true)
-        loss_d = self.bce_loss(y_d, y_true)
-        loss_s = self.bce_loss(y_s, y_true)
+        loss = self.bce_loss(y_pred.squeeze(), y_true)
+        loss_d = self.bce_loss(y_d.squeeze(), y_true)
+        loss_s = self.bce_loss(y_s.squeeze(), y_true)
         weight_d = loss_d - loss
         weight_s = loss_s - loss
         weight_d = torch.where(weight_d > 0, weight_d, torch.zeros(1).to(weight_d.device))
@@ -296,9 +296,9 @@ class Weighted_TriBCE_Loss(nn.Module):
         bce_loss = nn.BCELoss(weight=sample_weight)
         
         # compute losses
-        loss = bce_loss(y_pred, y_true)
-        loss_d = bce_loss(y_d, y_true)
-        loss_s = bce_loss(y_s, y_true)
+        loss = bce_loss(y_pred.squeeze(), y_true)
+        loss_d = bce_loss(y_d.squeeze(), y_true)
+        loss_s = bce_loss(y_s.squeeze(), y_true)
         
         # compute weights for deep and shallow losses
         weight_d = loss_d - loss
