@@ -173,7 +173,7 @@ class DCNv3(nn.Module):
                  shallow_net_dropout=0.05,
                  layer_norm=True,
                  batch_norm=False,
-                 deep_tower_units=[512, 256],
+                 deep_tower_units=[1024, 512],
                  activation=nn.ReLU 
                  ):
         super(DCNv3, self).__init__()
