@@ -135,27 +135,22 @@ class LinearCrossNetwork(nn.Module):
         x0 = x
 
         for i in range(self.num_cross_layers):
-            # Project down to half-dim
-            H = self.w[i](x)  # (batch, self.half)
+            H = self.w[i](x)  
 
-            # Apply BatchNorm to half-dim BEFORE concatenation
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
 
-            # Apply LayerNorm if present
             if len(self.layer_norm) > i:
                 H = self.layer_norm[i](H)
 
             mask = self.masker(H)
 
-            # Concatenate and pad
             H = torch.cat([H, H * mask], dim=-1)
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
                 pad = H.new_zeros(H.size(0), pad_size)
                 H = torch.cat([H, pad], dim=-1)
 
-            # Cross operation
             x = x0 * (H + self.b[i]) + x
 
             # Stabilize
@@ -172,12 +167,12 @@ class LinearCrossNetwork(nn.Module):
 class DCNv3(nn.Module):
     def __init__(self,
                  input_dim,
-                 num_deep_cross_layers=3,
-                 num_shallow_cross_layers=3,
+                 num_deep_cross_layers=1,
+                 num_shallow_cross_layers=1,
                  deep_net_dropout=0.05,
                  shallow_net_dropout=0.05,
                  layer_norm=True,
-                 batch_norm=True):
+                 batch_norm=False):
         super(DCNv3, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
