@@ -172,7 +172,10 @@ class DCNv3(nn.Module):
                  deep_net_dropout=0.05,
                  shallow_net_dropout=0.05,
                  layer_norm=True,
-                 batch_norm=False):
+                 batch_norm=False,
+                 deep_tower_units=[512, 256],
+                 activation=nn.ReLU 
+                 ):
         super(DCNv3, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
@@ -191,7 +194,24 @@ class DCNv3(nn.Module):
             layer_norm=layer_norm,
             batch_norm=batch_norm
         ).to(self.device)
-        
+
+######################################### 
+        # Deep tower after combining ECN & LCN
+        tower_layers = []
+        in_dim = 1  # since dlogit and slogit are scalar after mean pooling
+        # Instead of averaging early, keep the concatenated vector
+        self.concat_dim = input_dim  # for direct concat without mean
+
+        # Adjust: use ECN and LCN output before mean pooling
+        tower_input_dim = input_dim * 2
+        for units in deep_tower_units:
+            tower_layers.append(nn.Linear(tower_input_dim, units))
+            tower_layers.append(activation())
+            tower_layers.append(nn.Dropout(0.1))
+            tower_input_dim = units
+        tower_layers.append(nn.Linear(tower_input_dim, 1))
+        self.deep_tower = nn.Sequential(*tower_layers)
+##################################################################       
         self.apply(self._init_weights)
         self.output_activation = torch.sigmoid
 
@@ -204,21 +224,44 @@ class DCNv3(nn.Module):
             torch.nn.init.xavier_uniform_(module.weight)
 
     def forward(self, inputs):
+        #inputs = inputs.to(self.device)
+        
+        #feature_emb = inputs
+        #dlogit = self.ECN(feature_emb).mean(dim=1)
+        #slogit = self.LCN(feature_emb).mean(dim=1)
+        #logit = (dlogit + slogit) * 0.5
+    
+        #y_pred = self.output_activation(logit)
+        #y_d = self.output_activation(dlogit)
+        #y_s = self.output_activation(slogit)
+        #return {
+        #    "y_pred": y_pred,
+        #    "y_d": y_d,
+        #    "y_s": y_s
+        #}
+####################################
         inputs = inputs.to(self.device)
         
-        feature_emb = inputs
-        dlogit = self.ECN(feature_emb).mean(dim=1)
-        slogit = self.LCN(feature_emb).mean(dim=1)
-        logit = (dlogit + slogit) * 0.5
-    
+        # Get ECN and LCN full outputs (not mean-pooled yet)
+        d_feat = self.ECN(inputs)  # shape: [batch, input_dim, 1]
+        s_feat = self.LCN(inputs)  # shape: [batch, input_dim, 1]
+
+        # Concatenate along feature dimension
+        concat_feat = torch.cat([d_feat, s_feat], dim=1)  # shape: [batch, 2*input_dim]
+
+        # Pass through deep tower
+        logit = self.deep_tower(concat_feat)
+
         y_pred = self.output_activation(logit)
-        y_d = self.output_activation(dlogit)
-        y_s = self.output_activation(slogit)
+        y_d = self.output_activation(d_feat.mean(dim=1))
+        y_s = self.output_activation(s_feat.mean(dim=1))
+
         return {
             "y_pred": y_pred,
             "y_d": y_d,
             "y_s": y_s
-        }
+        }        
+####################################        
 
 class TriBCE_Loss(nn.Module):
     def __init__(self):
