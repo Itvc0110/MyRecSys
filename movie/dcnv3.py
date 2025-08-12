@@ -198,11 +198,8 @@ class DCNv3(nn.Module):
 ######################################### 
         # Deep tower after combining ECN & LCN
         tower_layers = []
-        in_dim = 1  # since dlogit and slogit are scalar after mean pooling
-        # Instead of averaging early, keep the concatenated vector
-        self.concat_dim = input_dim  # for direct concat without mean
-
-        # Adjust: use ECN and LCN output before mean pooling
+        
+        # For deep tower, we will concatenate the last hidden features from ECN and LCN
         tower_input_dim = input_dim * 2
         for units in deep_tower_units:
             tower_layers.append(nn.Linear(tower_input_dim, units))
@@ -211,6 +208,12 @@ class DCNv3(nn.Module):
             tower_input_dim = units
         tower_layers.append(nn.Linear(tower_input_dim, 1))
         self.deep_tower = nn.Sequential(*tower_layers)
+
+        # Remove final projection from ECN/LCN for feature extraction
+        self.ECN_proj = self.ECN.dfc
+        self.LCN_proj = self.LCN.sfc
+        self.ECN.dfc = nn.Identity()
+        self.LCN.sfc = nn.Identity()
 ##################################################################       
         self.apply(self._init_weights)
         self.output_activation = torch.sigmoid
@@ -242,25 +245,27 @@ class DCNv3(nn.Module):
 ####################################
         inputs = inputs.to(self.device)
         
-        # Get ECN and LCN full outputs (not mean-pooled yet)
-        d_feat = self.ECN(inputs)  # shape: [batch, input_dim, 1]
-        s_feat = self.LCN(inputs)  # shape: [batch, input_dim, 1]
+        # Get ECN and LCN hidden features (no final projection)
+        d_feat = self.ECN(inputs)  # [batch, input_dim]
+        s_feat = self.LCN(inputs)  # [batch, input_dim]
 
-        # Concatenate along feature dimension
-        concat_feat = torch.cat([d_feat, s_feat], dim=1)  # shape: [batch, 2*input_dim]
-
-        # Pass through deep tower
+        # Concatenate features for deep tower
+        concat_feat = torch.cat([d_feat, s_feat], dim=1)  # [batch, 2*input_dim]
         logit = self.deep_tower(concat_feat)
 
+        # Get original ECN & LCN logits by applying saved projections
+        dlogit = self.ECN_proj(d_feat)
+        slogit = self.LCN_proj(s_feat)
+
         y_pred = self.output_activation(logit)
-        y_d = self.output_activation(d_feat.mean(dim=1))
-        y_s = self.output_activation(s_feat.mean(dim=1))
+        y_d = self.output_activation(dlogit)
+        y_s = self.output_activation(slogit)
 
         return {
             "y_pred": y_pred,
             "y_d": y_d,
             "y_s": y_s
-        }        
+        }       
 ####################################        
 
 class TriBCE_Loss(nn.Module):
