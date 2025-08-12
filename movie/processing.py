@@ -63,13 +63,13 @@ def process_data(output_filepath):
         combined_df = pd.concat(all_merged_data, ignore_index=True)
         print(f"\nTotal merged rows before drop duplicates: {len(combined_df)}")
 
-        combined_df = combined_df.drop_duplicates()
-        print(f"→ After drop_duplicates: {len(combined_df)}")
+        #combined_df = combined_df.drop_duplicates()
+        #print(f"→ After drop_duplicates: {len(combined_df)}")
 
         combined_df['content_duration'] = combined_df['content_duration'].astype(float)
         combined_df['duration'] = combined_df['duration'].astype(float)
         combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
-        combined_df['label'] = (combined_df['percent_duration'] > 0.05).astype(int)
+        combined_df['label'] = (combined_df['percent_duration'] > 0.1).astype(int)
         combined_df = combined_df.drop(columns=['percent_duration', 'duration'], inplace=False)
         combined_df['content_duration'] = np.log(combined_df['content_duration'])
 
