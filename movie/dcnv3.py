@@ -198,16 +198,31 @@ class DCNv3(nn.Module):
 ######################################### 
         # Deep tower after combining ECN & LCN
         tower_layers = []
-        
-        # For deep tower, we will concatenate the last hidden features from ECN and LCN
-        tower_input_dim = input_dim * 2
-        for units in deep_tower_units:
+
+        # Rich feature interactions
+        # Get ECN and LCN outputs before forward
+        self.concat_dim = input_dim * 4  # [ECN, LCN, ECN*LCN, |ECN-LCN|]
+
+        tower_input_dim = self.concat_dim
+        for units in deep_tower_units + [deep_tower_units[-1]]:  # extra block
             tower_layers.append(nn.Linear(tower_input_dim, units))
+            tower_layers.append(nn.BatchNorm1d(units))
             tower_layers.append(activation())
-            tower_layers.append(nn.Dropout(0.1))
+            tower_layers.append(nn.Dropout(0.2))
             tower_input_dim = units
+
+        # Main prediction head
         tower_layers.append(nn.Linear(tower_input_dim, 1))
         self.deep_tower = nn.Sequential(*tower_layers)
+
+        # Optional auxiliary calibration head
+        self.aux_head = nn.Sequential(
+            nn.Linear(self.concat_dim, 256),
+            activation(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
 
         # Remove final projection from ECN/LCN for feature extraction
         self.ECN_proj = self.ECN.dfc
@@ -244,16 +259,25 @@ class DCNv3(nn.Module):
         #}
 ####################################
         inputs = inputs.to(self.device)
-        
-        # Get ECN and LCN hidden features (no final projection)
-        d_feat = self.ECN(inputs)  # [batch, input_dim]
-        s_feat = self.LCN(inputs)  # [batch, input_dim]
 
-        # Concatenate features for deep tower
-        concat_feat = torch.cat([d_feat, s_feat], dim=1)  # [batch, 2*input_dim]
+        # Get ECN and LCN hidden features
+        d_feat = self.ECN(inputs)  # [B, input_dim]
+        s_feat = self.LCN(inputs)  # [B, input_dim]
+
+        # Create interaction features
+        prod_feat = d_feat * s_feat
+        diff_feat = torch.abs(d_feat - s_feat)
+
+        # Combine all
+        concat_feat = torch.cat([d_feat, s_feat, prod_feat, diff_feat], dim=1)  # [B, 4*input_dim]
+
+        # Pass through deep tower
         logit = self.deep_tower(concat_feat)
 
-        # Get original ECN & LCN logits by applying saved projections
+        # Aux head output
+        aux_out = self.aux_head(concat_feat)
+
+        # Get ECN/LCN original logits
         dlogit = self.ECN_proj(d_feat)
         slogit = self.LCN_proj(s_feat)
 
@@ -264,8 +288,9 @@ class DCNv3(nn.Module):
         return {
             "y_pred": y_pred,
             "y_d": y_d,
-            "y_s": y_s
-        }       
+            "y_s": y_s,
+            "aux": aux_out
+        }     
 ####################################        
 
 class TriBCE_Loss(nn.Module):
