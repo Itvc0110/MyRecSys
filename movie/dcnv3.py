@@ -172,9 +172,7 @@ class DCNv3(nn.Module):
                  deep_net_dropout=0.05,
                  shallow_net_dropout=0.05,
                  layer_norm=True,
-                 batch_norm=False,
-                 deep_tower_units=[1024, 512],
-                 activation=nn.ReLU 
+                 batch_norm=False
                  ):
         super(DCNv3, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -194,42 +192,7 @@ class DCNv3(nn.Module):
             layer_norm=layer_norm,
             batch_norm=batch_norm
         ).to(self.device)
-
-######################################### 
-        # Deep tower after combining ECN & LCN
-        tower_layers = []
-
-        # Rich feature interactions
-        # Get ECN and LCN outputs before forward
-        self.concat_dim = input_dim * 4  # [ECN, LCN, ECN*LCN, |ECN-LCN|]
-
-        tower_input_dim = self.concat_dim
-        for units in deep_tower_units + [deep_tower_units[-1]]:  # extra block
-            tower_layers.append(nn.Linear(tower_input_dim, units))
-            tower_layers.append(nn.BatchNorm1d(units))
-            tower_layers.append(activation())
-            tower_layers.append(nn.Dropout(0.2))
-            tower_input_dim = units
-
-        # Main prediction head
-        tower_layers.append(nn.Linear(tower_input_dim, 1))
-        self.deep_tower = nn.Sequential(*tower_layers)
-
-        # Optional auxiliary calibration head
-        self.aux_head = nn.Sequential(
-            nn.Linear(self.concat_dim, 256),
-            activation(),
-            nn.Dropout(0.1),
-            nn.Linear(256, 1),
-            nn.Sigmoid()
-        )
-
-        # Remove final projection from ECN/LCN for feature extraction
-        self.ECN_proj = self.ECN.dfc
-        self.LCN_proj = self.LCN.sfc
-        self.ECN.dfc = nn.Identity()
-        self.LCN.sfc = nn.Identity()
-##################################################################       
+     
         self.apply(self._init_weights)
         self.output_activation = torch.sigmoid
 
@@ -242,56 +205,21 @@ class DCNv3(nn.Module):
             torch.nn.init.xavier_uniform_(module.weight)
 
     def forward(self, inputs):
-        #inputs = inputs.to(self.device)
-        
-        #feature_emb = inputs
-        #dlogit = self.ECN(feature_emb).mean(dim=1)
-        #slogit = self.LCN(feature_emb).mean(dim=1)
-        #logit = (dlogit + slogit) * 0.5
-    
-        #y_pred = self.output_activation(logit)
-        #y_d = self.output_activation(dlogit)
-        #y_s = self.output_activation(slogit)
-        #return {
-        #    "y_pred": y_pred,
-        #    "y_d": y_d,
-        #    "y_s": y_s
-        #}
-####################################
         inputs = inputs.to(self.device)
-
-        # Get ECN and LCN hidden features
-        d_feat = self.ECN(inputs)  # [B, input_dim]
-        s_feat = self.LCN(inputs)  # [B, input_dim]
-
-        # Create interaction features
-        prod_feat = d_feat * s_feat
-        diff_feat = torch.abs(d_feat - s_feat)
-
-        # Combine all
-        concat_feat = torch.cat([d_feat, s_feat, prod_feat, diff_feat], dim=1)  # [B, 4*input_dim]
-
-        # Pass through deep tower
-        logit = self.deep_tower(concat_feat)
-
-        # Aux head output
-        aux_out = self.aux_head(concat_feat)
-
-        # Get ECN/LCN original logits
-        dlogit = self.ECN_proj(d_feat)
-        slogit = self.LCN_proj(s_feat)
-
+        
+        feature_emb = inputs
+        dlogit = self.ECN(feature_emb).mean(dim=1)
+        logit = self.LCN(feature_emb).mean(dim=1)
+        logit = (dlogit + slogit) * 0.5
+    
         y_pred = self.output_activation(logit)
         y_d = self.output_activation(dlogit)
         y_s = self.output_activation(slogit)
-
         return {
             "y_pred": y_pred,
             "y_d": y_d,
-            "y_s": y_s,
-            "aux": aux_out
-        }     
-####################################        
+            "y_s": y_s
+        }       
 
 class TriBCE_Loss(nn.Module):
     def __init__(self):
