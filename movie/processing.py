@@ -76,7 +76,7 @@ def process_data(output_filepath):
 
 ####################################################################################
         # Count how many times each user watched the same content
-        watch_counts = combined_df.groupby(['username', 'content_id']).size().reset_index(name='watch_count')
+        watch_counts = combined_df.groupby(['profile_id', 'content_id']).size().reset_index(name='watch_count')
         combined_df = combined_df.merge(watch_counts, on=['username', 'content_id'], how='left')
 
         # Label is 1 if percent_duration > 0.1 OR watched more than 2 times
