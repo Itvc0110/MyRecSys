@@ -73,8 +73,8 @@ def process_data(output_filepath):
         combined_df['watch_count'] = combined_df.groupby(['profile_id', 'content_id'])['content_id'].transform('count')
 
         combined_df['label'] = (
-            (combined_df['percent_duration'] >= 0.9) &
-            (combined_df['watch_count'] >= 3)
+            (combined_df['percent_duration'] >= 0.9) |
+            (combined_df['watch_count'] >= 2)
         ).astype(int)
 
         combined_df = combined_df.drop(columns=['percent_duration', 'duration', 'watch_count'], inplace=False)
