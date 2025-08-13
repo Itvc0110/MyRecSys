@@ -72,7 +72,6 @@ def process_music_item(music_data_path, output_dir, num_music=-1, mode='train'):
         dtype_spec = {
             'content_id': str,
             'content_publish_year': 'float32',
-            # 'content_country': str,
             'type_id': str,
             'tag_names': str,
             'content_duration': 'float32',
@@ -82,7 +81,7 @@ def process_music_item(music_data_path, output_dir, num_music=-1, mode='train'):
         }
         music_df = pd.read_parquet(merged_file, dtype=dtype_spec)
 
-    # Clean durations
+    # clean durations
     music_df['content_duration'] = pd.to_numeric(music_df['content_duration'], errors='coerce')
     music_df = music_df[music_df['content_duration'] > 0]
 
@@ -90,14 +89,12 @@ def process_music_item(music_data_path, output_dir, num_music=-1, mode='train'):
     music_df["content_publish_year"] = music_df["content_publish_year"].fillna(music_df["content_publish_year"].mean())
 
     cols = ['content_id','content_publish_year', 
-            #'content_country',
             'type_id','tag_names','content_duration','content_status',
             'VOD_CODE','content_cate_id']
     music_df = music_df[cols]
 
     # encoder
-    single_cols = [#"content_country",
-                   "VOD_CODE", "type_id"]
+    single_cols = ["VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
     cont_cols = ["content_publish_year"]
 
