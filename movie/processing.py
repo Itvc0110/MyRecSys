@@ -80,7 +80,7 @@ def process_data(output_filepath):
 
         # label: either watched more than 10% or more than 2 times
         combined_df['label'] = (
-            (combined_df['percent_duration'] >= 0.9) |
+            (combined_df['percent_duration'] >= 0.99) |
             (combined_df['watch_count'] >= 2)
         ).astype(int)
 
