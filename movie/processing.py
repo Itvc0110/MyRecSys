@@ -75,12 +75,14 @@ def process_data(output_filepath):
         #combined_df['content_duration'] = np.log(combined_df['content_duration'])
 
 ####################################################################################
-        # Count how many times each user watched the same content
-        watch_counts = combined_df.groupby(['profile_id', 'content_id']).size().reset_index(name='watch_count')
-        combined_df = combined_df.merge(watch_counts, on=['username', 'content_id'], how='left')
+        # compute watch counts using profile_id + content_id
+        combined_df['watch_count'] = combined_df.groupby(['profile_id', 'content_id'])['content_id'].transform('count')
 
-        # Label is 1 if percent_duration > 0.1 OR watched more than 2 times
-        combined_df['label'] = ((combined_df['percent_duration'] > 0.1) | (combined_df['watch_count'] >= 2)).astype(int)
+        # label: either watched more than 10% or more than 2 times
+        combined_df['label'] = (
+            (combined_df['percent_duration'] > 0.3) |
+            (combined_df['watch_count'] >= 2)
+        ).astype(int)
 
         combined_df = combined_df.drop(columns=['percent_duration', 'duration', 'watch_count'], inplace=False)
         combined_df['content_duration'] = np.log(combined_df['content_duration'])
