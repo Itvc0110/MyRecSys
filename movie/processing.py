@@ -84,3 +84,47 @@ def process_data(output_filepath):
         return combined_df
     else:
         return
+    
+def process_infer_data(processed_user_path, user_data_path, processed_item_path, movie_data_path, content_movie_path, num_user=-1, num_movie=-1):
+
+    print("Preprocessing user and item data...")
+    preprocess_start = time.time()
+    if not os.path.exists(processed_user_path):
+        print("  ↪︎ Processing user data...")
+        process_user_data(user_data_path, output_dir="movie/infer_data", num_user=num_user, mode='infer')
+    else:
+        print("  ↪︎ User data already exists, skipping preprocessing.")
+    if not os.path.exists(processed_item_path):
+        print("  ↪︎ Processing item data...")
+        process_movie_item(movie_data_path, output_dir="movie/infer_data", num_movie=num_movie, mode='infer')
+    else:
+        print("  ↪︎ Item data already exists, skipping preprocessing.")
+    print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
+
+    print("\nLoading user and item data...")
+    user_df = pd.read_parquet(processed_user_path)
+    movie_df = pd.read_parquet(processed_item_path)
+
+    project_root = Path().resolve()
+    duration_dir = os.path.join(project_root, "movie/merged_duration")
+    durations = glob.glob(os.path.join(duration_dir, "*.parquet"))
+    user_profile_list = []
+    for duration in durations:
+        df = pd.read_parquet(duration, columns=["username", "profile_id"])
+        user_profile_list.append(df.drop_duplicates())
+    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
+    user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
+    print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
+
+    movie_pl = pl.from_pandas(movie_df)
+    total_contents = movie_pl.height
+    print(f"\nTotal unique contents: {total_contents:,}")
+
+    content_movie_pl = pl.read_parquet(content_movie_path)
+    content_unique = (
+        content_movie_pl
+        .unique(subset=['content_id'])
+        .select(['content_id', 'content_name', 'tag_names', 'type_id'])
+    )
+    content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
+    return user_profile_df, movie_pl, content_dict

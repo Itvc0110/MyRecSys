@@ -84,3 +84,47 @@ def process_data(output_filepath):
         return combined_df
     else:
         return
+    
+def process_infer_data(processed_user_path, user_data_path, processed_item_path, clip_data_path, content_clip_path, num_user=-1, num_clip=-1):
+
+    print("Preprocessing user and item data...")
+    preprocess_start = time.time()
+    if not os.path.exists(processed_user_path):
+        print("  ↪︎ Processing user data...")
+        process_user_data(user_data_path, output_dir="clip/infer_data", num_user=num_user, mode='infer')
+    else:
+        print("  ↪︎ User data already exists, skipping preprocessing.")
+    if not os.path.exists(processed_item_path):
+        print("  ↪︎ Processing item data...")
+        process_clip_item(clip_data_path, output_dir="clip/infer_data", num_clip=num_clip, mode='infer')
+    else:
+        print("  ↪︎ Item data already exists, skipping preprocessing.")
+    print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
+
+    print("\nLoading user and item data...")
+    user_df = pd.read_parquet(processed_user_path)
+    clip_df = pd.read_parquet(processed_item_path)
+
+    project_root = Path().resolve()
+    duration_dir = os.path.join(project_root, "clip/merged_duration")
+    durations = glob.glob(os.path.join(duration_dir, "*.parquet"))
+    user_profile_list = []
+    for duration in durations:
+        df = pd.read_parquet(duration, columns=["username", "profile_id"])
+        user_profile_list.append(df.drop_duplicates())
+    user_profile_df = pd.concat(user_profile_list, ignore_index=True).drop_duplicates()
+    user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
+    print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
+
+    clip_pl = pl.from_pandas(clip_df)
+    total_contents = clip_pl.height
+    print(f"\nTotal unique contents: {total_contents:,}")
+
+    content_clip_pl = pl.read_parquet(content_clip_path)
+    content_unique = (
+        content_clip_pl
+        .unique(subset=['content_id'])
+        .select(['content_id', 'content_name', 'tag_names', 'type_id'])
+    )
+    content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
+    return user_profile_df, clip_pl, content_dict

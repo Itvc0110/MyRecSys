@@ -4,6 +4,7 @@ import os
 import joblib
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from pathlib import Path
+from datetime import datetime
 
 ENC_DIR = "model/movie/encoder"
 os.makedirs(ENC_DIR, exist_ok=True)
@@ -48,11 +49,19 @@ def transform_user_data(user_data, cat_cols, cont_cols):
 def process_user_data(data_path, output_dir, num_user=-1, mode='train'):
     user_data = pd.read_parquet(data_path)
 
-    user_data = user_data.dropna()
-    user_data = user_data[user_data['birthday'].str.isdigit()]
-    user_data['birthday'] = user_data['birthday'].str[:4].astype(int)
+    user_data = user_data.fillna(0)
+
+    current_year = datetime.now().year
+    user_data['birthday'] = user_data['birthday'].astype(str)
+    user_data['birthday'] = user_data['birthday'].apply(
+        lambda x: x[-4:] if x.isdigit() and len(x) > 3 else str(current_year)
+    )
+    user_data['birthday'] = user_data['birthday'].astype(int)
+
+
     user_data = user_data.drop(columns=["tentinh"])
-    user_data = user_data.drop(columns=["province"]) 
+    user_data = user_data.drop(columns=["province"])
+    user_data['sex'] = user_data['sex'].apply(lambda x: x if str(x).isdigit() else 1)
     user_data['sex'] = user_data['sex'].astype(int)
     user_data['sex'] = user_data['sex'].apply(lambda x: x if x in [0, 1] else 1)
 
