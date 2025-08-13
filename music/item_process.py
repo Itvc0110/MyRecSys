@@ -28,7 +28,7 @@ def merge_content_musics(music_data_path, output_file):
     df.to_parquet(output_file, index=False)
     return df
 
-def fit_item_encoder(data, single_cols, mlb_col, cont_cols):
+def fit_item_encoder(data, single_cols, mlb_col):
     ohe = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
     ohe.fit(data[single_cols])
     joblib.dump(ohe, Path("model/music/encoder/item_ohe_single.joblib"))
@@ -38,11 +38,7 @@ def fit_item_encoder(data, single_cols, mlb_col, cont_cols):
     mlb.fit(lists)
     joblib.dump(mlb, Path("model/music/encoder/item_mlb_cate.joblib"))
 
-    scaler = StandardScaler()
-    scaler.fit(data[cont_cols])
-    joblib.dump(scaler, Path("model/music/encoder/item_scaler.joblib"))
-
-def transform_item_data(data, single_cols, mlb_col, cont_cols):
+def transform_item_data(data, single_cols, mlb_col):
     ohe = joblib.load(Path("model/music/encoder/item_ohe_single.joblib"))
     mlb = joblib.load(Path("model/music/encoder/item_mlb_cate.joblib"))
     scaler = joblib.load(ENC_DIR / "item_scaler.joblib")
@@ -54,11 +50,8 @@ def transform_item_data(data, single_cols, mlb_col, cont_cols):
     mlb_arr = mlb.transform(mlb_lists)
     mlb_df = pd.DataFrame(mlb_arr, columns=[f"content_cate_id_{c}" for c in mlb.classes_], index=data.index)
 
-    scaled_arr = scaler.transform(data[cont_cols])
-    scaled_df = pd.DataFrame(scaled_arr, columns=cont_cols, index=data.index)
-
-    data = data.drop(single_cols + [mlb_col] + cont_cols, axis=1)
-    return pd.concat([data, ohe_df, mlb_df, scaled_df], axis=1)
+    data = data.drop(single_cols + [mlb_col], axis=1)
+    return pd.concat([data, ohe_df, mlb_df], axis=1)
 
 def process_music_item(music_data_path, output_dir, num_music=-1, mode='train'):
     project_root = Path().resolve()
@@ -71,7 +64,6 @@ def process_music_item(music_data_path, output_dir, num_music=-1, mode='train'):
     else:
         dtype_spec = {
             'content_id': str,
-            'content_publish_year': 'float32',
             'type_id': str,
             'tag_names': str,
             'content_duration': 'float32',
@@ -85,25 +77,21 @@ def process_music_item(music_data_path, output_dir, num_music=-1, mode='train'):
     music_df['content_duration'] = pd.to_numeric(music_df['content_duration'], errors='coerce')
     music_df = music_df[music_df['content_duration'] > 0]
 
-    music_df["content_publish_year"] = pd.to_numeric(music_df["content_publish_year"].astype(str).str[:4], errors='coerce')
-    music_df["content_publish_year"] = music_df["content_publish_year"].fillna(music_df["content_publish_year"].mean())
-
-    cols = ['content_id','content_publish_year', 
-            'type_id','tag_names','content_duration','content_status',
+    cols = ['content_id','type_id','tag_names',
+            'content_duration','content_status',
             'VOD_CODE','content_cate_id']
     music_df = music_df[cols]
 
     # encoder
     single_cols = ["VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
-    cont_cols=None
 
     # train mode
     if mode == 'train':
-        fit_item_encoder(music_df, single_cols, mlb_col, cont_cols)
+        fit_item_encoder(music_df, single_cols, mlb_col)
 
     # transform
-    music_df = transform_item_data(music_df, single_cols, mlb_col, cont_cols)
+    music_df = transform_item_data(music_df, single_cols, mlb_col)
 
     # filter with content_status and drop those with not suitable tag_names
     if num_music != -1:
