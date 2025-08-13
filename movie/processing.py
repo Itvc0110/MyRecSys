@@ -70,15 +70,8 @@ def process_data(output_filepath):
         combined_df['duration'] = combined_df['duration'].astype(float)
         combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
 
-        #combined_df['label'] = (combined_df['percent_duration'] > 0.1).astype(int)
-        #combined_df = combined_df.drop(columns=['percent_duration', 'duration'], inplace=False)
-        #combined_df['content_duration'] = np.log(combined_df['content_duration'])
-
-####################################################################################
-        # compute watch counts using profile_id + content_id
         combined_df['watch_count'] = combined_df.groupby(['profile_id', 'content_id'])['content_id'].transform('count')
 
-        # label: either watched more than 10% or more than 2 times
         combined_df['label'] = (
             (combined_df['percent_duration'] >= 1) |
             (combined_df['watch_count'] >= 3)
@@ -86,7 +79,6 @@ def process_data(output_filepath):
 
         combined_df = combined_df.drop(columns=['percent_duration', 'duration', 'watch_count'], inplace=False)
         combined_df['content_duration'] = np.log(combined_df['content_duration'])
-####################################################################################
 
         combined_df.to_parquet(output_filepath, index=False)
         return combined_df

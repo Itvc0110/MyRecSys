@@ -69,8 +69,15 @@ def process_data(output_filepath):
         combined_df['content_duration'] = combined_df['content_duration'].astype(float)
         combined_df['duration'] = combined_df['duration'].astype(float)
         combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
-        combined_df['label'] = (combined_df['percent_duration'] > 0.1).astype(int)
-        combined_df = combined_df.drop(columns=['percent_duration', 'duration'], inplace=False)
+
+        combined_df['watch_count'] = combined_df.groupby(['profile_id', 'content_id'])['content_id'].transform('count')
+
+        combined_df['label'] = (
+            (combined_df['percent_duration'] >= 1) |
+            (combined_df['watch_count'] >= 3)
+        ).astype(int)
+
+        combined_df = combined_df.drop(columns=['percent_duration', 'duration', 'watch_count'], inplace=False)
         combined_df['content_duration'] = np.log(combined_df['content_duration'])
 
         combined_df.to_parquet(output_filepath, index=False)
