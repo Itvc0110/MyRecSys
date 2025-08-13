@@ -96,7 +96,7 @@ def process_music_item(music_data_path, output_dir, num_music=-1, mode='train'):
     # encoder
     single_cols = ["VOD_CODE", "type_id"]
     mlb_col = "content_cate_id"
-    cont_cols = ["content_publish_year"]
+    cont_cols = []
 
     # train mode
     if mode == 'train':
