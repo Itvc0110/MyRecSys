@@ -111,12 +111,13 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
 
     # filter with content_status and drop those with not suitable tag_names
     if num_movie != -1:
-        movie_df = (movie_df[(movie_df['content_status'] == "1") & (movie_df['tag_names'].str.contains(r'\w', na=False))]
+        movie_df = (movie_df[(movie_df['content_status'] == "1") & (movie_df['tag_names'].str.contains(r'\w', na=False)) & (movie_df['content_single'] == "1")]
                     .head(num_movie)
                     .dropna(subset=['tag_names']))
 
     if 'tag_names' in movie_df.columns:
         movie_df = movie_df.drop('tag_names', axis=1)
+    movie_df = movie_df.drop('content_single', axis=1)
     # save final output
     movie_df.to_parquet(full_output_dir / "movie_item_data.parquet", index=False)
 
