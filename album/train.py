@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3, TriBCE_Loss, Weighted_TriBCE_Loss
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
-model_save_dir = os.path.join(Path().resolve(), "model/other")
+model_save_dir = os.path.join(Path().resolve(), "model/album")
 os.makedirs(model_save_dir, exist_ok=True)
 
 def print_class_distribution(y_data, name):
@@ -35,18 +35,16 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
     auc_scores = []
 
     project_root = Path().resolve()
-    model_path = "model/other/best_model.pth"
+    model_path = "model/album/best_model.pth"
     model_path = os.path.join(project_root, model_path)
 
-    # Early stopping variables
-    best_val_loss = float('inf')  # Initialize to infinity
+    best_val_loss = float('inf')  
     if os.path.exists(model_path):
         previous_model = torch.load(model_path, map_location=device)
         best_previous_loss = previous_model['loss']
     else:
         best_previous_loss = float('inf')
-    early_stop_counter = 0        # Counter for epochs without improvement
-
+    early_stop_counter = 0       
 
     for epoch in range(epochs):
         model.train()
@@ -54,11 +52,9 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
         all_y_true = []
         all_y_scores = []
 
-        # Training loop
         for batch_idx, (inputs, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}")):
             inputs = inputs.to(device)
             labels = labels.to(device)
-
             optimizer.zero_grad()
             output = model(inputs)
             loss = loss_fn(output['y_pred'], labels, output['y_d'], output['y_s'])
@@ -89,22 +85,19 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
         f1_scores.append(f1)
         auc_scores.append(auc)
 
-        # Display training metrics
         print(f'Epoch {epoch + 1}/{epochs} - Training Loss: {avg_train_loss:.4f}')
         print(f'Precision: {precision:.4f}')
         print(f'Recall: {recall:.4f}')
         print(f'F1 Score: {f1:.4f}')
         print(f'AUC: {auc:.4f}')
 
-        # Compute validation loss
         val_loss = validate(model, val_loader, loss_fn, device)
 
-        # Early stopping logic
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             early_stop_counter = 0
             if best_val_loss < best_previous_loss:
-                save_checkpoint(model, epoch, optimizer, best_val_loss, path="model/other/best_model.pth")
+                save_checkpoint(model, epoch, optimizer, best_val_loss, path="model/album/best_model.pth")
         else:
             early_stop_counter += 1
             if early_stop_counter >= patience:
@@ -141,15 +134,14 @@ def validate(model, val_loader, loss_fn, device):
     f1 = f1_score(all_y_true, y_pred, zero_division=0)
     auc = roc_auc_score(all_y_true, all_y_scores)
 
-    # Display validation metrics
     print(f'\nValidation Loss: {avg_val_loss:.4f}')
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')
     print(f'AUC: {auc:.4f}\n')
 
-    model.train()  # Switch back to training mode
-    return avg_val_loss  # Return validation loss for early stopping
+    model.train()  
+    return avg_val_loss  
 
 def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
     project_root = Path().resolve()
@@ -160,31 +152,29 @@ def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': loss
     }
-    torch.save(checkpoint, path)
+    torch.save(checkpoint, model_path)
     print(f"Checkpoint saved at epoch {epoch}")
 
 if __name__ == "__main__":
     project_root = Path().resolve()
-    data_path = "other/train_data/merged_user_item_duration.csv"
+    data_path = "album/train_data/merged_user_item_duration.parquet"
     data_path = os.path.join(project_root, data_path)
     if os.path.exists(data_path):
-        data = pd.read_csv(data_path)
+        data = pd.read_parquet(data_path)
     else:
         data = process_data(data_path)
 
     train_data = data.drop(columns=["username", "content_id", "profile_id"])
-    train_data = train_data.apply(pd.to_numeric, errors='coerce')
-    critical_cols = ["label"] 
-    train_data = train_data.dropna(subset=critical_cols)
     train_data = train_data.fillna(0)
-
+    train_data = train_data.apply(pd.to_numeric, errors='coerce')
+    train_data = train_data.dropna()
     y = train_data["label"]
     X = train_data.drop(columns=["label"])
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
     raw_root = (len(y) - y.sum()) / y.sum()
-    pos_weight = 0.5*raw_root + math.sqrt(raw_root)
+    pos_weight = math.sqrt(raw_root)
 
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
@@ -202,8 +192,8 @@ if __name__ == "__main__":
 
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
     val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=2048, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=2048, shuffle=False)
 
     input_dim = X_train_tensor.shape[1]
     model = DCNv3(input_dim)
@@ -211,8 +201,8 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-2)
-    loss_fn = TriBCE_Loss()
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
 
     start_time = time.time()
     for i in range(5):
