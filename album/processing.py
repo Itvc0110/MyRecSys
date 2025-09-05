@@ -48,14 +48,29 @@ def process_data(output_filepath):
 
             print(f"\nProcessing {os.path.basename(duration)}")
             print(f"→ Duration rows: {len(duration_df)}")
+            print(f"   Unique duration content_id: {duration_df['content_id'].nunique()}")
+            print(f"   Sample duration content_id: {duration_df['content_id'].head(5).tolist()}")
+
+            print(f"User DF rows: {len(user_df)}, unique usernames: {user_df['username'].nunique()}")
+            print(f"Album DF rows: {len(album_df)}, unique content_id: {album_df['content_id'].nunique()}")
+            print(f"   Sample album content_id: {album_df['content_id'].head(5).tolist()}")
 
             merged_with_user = pd.merge(duration_df, user_df, on='username', how='inner')
             print(f"→ After user merge: {len(merged_with_user)}")
+            print(f"   Unique usernames after merge: {merged_with_user['username'].nunique()}")
 
             final_merged = pd.merge(merged_with_user, album_df, on='content_id', how='inner')
             print(f"→ After album merge: {len(final_merged)}")
+            print(f"   Unique content_id after merge: {final_merged['content_id'].nunique()}")
+
+            # Optional: check overlap explicitly
+            overlap = set(duration_df['content_id']).intersection(set(album_df['content_id']))
+            print(f"   Overlap content_id count: {len(overlap)}")
+            if overlap:
+                print(f"   Sample overlap content_id: {list(overlap)[:5]}")
 
             all_merged_data.append(final_merged)
+
         except Exception as e:
             print(f"Error processing {duration}: {str(e)}")
 
