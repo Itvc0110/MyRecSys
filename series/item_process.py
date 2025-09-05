@@ -110,7 +110,7 @@ def process_album_item(album_data_path, output_dir, num_album=-1, mode='train'):
     album_df = transform_item_data(album_df, single_cols, mlb_col, cont_cols)
 
     # filter with content_status and drop those with not suitable tag_names
-    if num_album != -1:
+    if num_series!= -1:
         album_df = (album_df[(album_df['content_status'] == "1") & (album_df['tag_names'].str.contains(r'\w', na=False))]
                     .head(num_album)
                     .dropna(subset=['tag_names']))

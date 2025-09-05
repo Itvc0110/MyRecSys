@@ -1,10 +1,10 @@
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import cpu_count
 from duration_process import merge_parquet_files
-from item_process import process_livestream_item
+from item_process import process_album_item
 from user_process import process_user_data
 import glob
-import time 
+from time import time
 from math import ceil
 import numpy as np
 import os
@@ -21,23 +21,23 @@ def process_data(output_filepath):
     duration_folder_path = "duration"
     duration_folder_path = os.path.join(project_root, duration_folder_path)
 
-    merged_duration_folder_path = "livestream/merged_duration"
+    merged_duration_folder_path = "album/merged_duration"
     merged_duration_folder_path = os.path.join(project_root, merged_duration_folder_path)
 
     user_path = "month_mytv_info.parquet"
     user_path = os.path.join(project_root, user_path)
 
-    livestream_data_path = "mytv_vmp_content"
-    livestream_data_path = os.path.join(project_root, livestream_data_path)
+    album_data_path = "mytv_vmp_content"
+    album_data_path = os.path.join(project_root, album_data_path)
 
     durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
     if len(durations)<1:
         merge_parquet_files(duration_folder_path, merged_duration_folder_path)
         durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
 
-    user_df = process_user_data(user_path, "livestream/train_data", mode='train')
-    livestream_df = process_livestream_item(livestream_data_path, "livestream/train_data", mode='train')
-    livestream_df['content_id'] = livestream_df['content_id'].astype(str)
+    user_df = process_user_data(user_path, "album/train_data", mode='train')
+    album_df = process_album_item(album_data_path, "album/train_data", mode='train')
+    album_df['content_id'] = album_df['content_id'].astype(str)
 
     all_merged_data = []
 
@@ -48,14 +48,29 @@ def process_data(output_filepath):
 
             print(f"\nProcessing {os.path.basename(duration)}")
             print(f"→ Duration rows: {len(duration_df)}")
+            print(f"   Unique duration content_id: {duration_df['content_id'].nunique()}")
+            print(f"   Sample duration content_id: {duration_df['content_id'].head(5).tolist()}")
+
+            print(f"User DF rows: {len(user_df)}, unique usernames: {user_df['username'].nunique()}")
+            print(f"seriesDF rows: {len(album_df)}, unique content_id: {album_df['content_id'].nunique()}")
+            print(f"   Sample seriescontent_id: {album_df['content_id'].head(5).tolist()}")
 
             merged_with_user = pd.merge(duration_df, user_df, on='username', how='inner')
             print(f"→ After user merge: {len(merged_with_user)}")
+            print(f"   Unique usernames after merge: {merged_with_user['username'].nunique()}")
 
-            final_merged = pd.merge(merged_with_user, livestream_df, on='content_id', how='inner')
-            print(f"→ After livestream merge: {len(final_merged)}")
+            final_merged = pd.merge(merged_with_user, album_df, on='content_id', how='inner')
+            print(f"→ After seriesmerge: {len(final_merged)}")
+            print(f"   Unique content_id after merge: {final_merged['content_id'].nunique()}")
+
+            # Optional: check overlap explicitly
+            overlap = set(duration_df['content_id']).intersection(set(album_df['content_id']))
+            print(f"   Overlap content_id count: {len(overlap)}")
+            if overlap:
+                print(f"   Sample overlap content_id: {list(overlap)[:5]}")
 
             all_merged_data.append(final_merged)
+
         except Exception as e:
             print(f"Error processing {duration}: {str(e)}")
 
@@ -66,47 +81,47 @@ def process_data(output_filepath):
         combined_df = combined_df.drop_duplicates()
         print(f"→ After drop_duplicates: {len(combined_df)}")
 
-        combined_df['content_duration'] = combined_df['content_duration'].astype(float)
+        #combined_df['content_duration'] = combined_df['content_duration'].astype(float)
         combined_df['duration'] = combined_df['duration'].astype(float)
-        combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
+        #combined_df['percent_duration'] = combined_df['duration']/combined_df['content_duration']
 
         combined_df['watch_count'] = combined_df.groupby(['profile_id', 'content_id'])['content_id'].transform('count')
 
         combined_df['label'] = (
-            #(combined_df['percent_duration'] >= 1) |
+            #(combined_df['percent_duration'] >= 0.3) |
             (combined_df['watch_count'] >= 2)
         ).astype(int)
 
-        combined_df = combined_df.drop(columns=['percent_duration', 'duration', 'watch_count'], inplace=False)
-        combined_df['content_duration'] = np.log(combined_df['content_duration'])
+        combined_df = combined_df.drop(columns=['duration', 'watch_count'], inplace=False)
+        #combined_df['content_duration'] = np.log(combined_df['content_duration'])
 
         combined_df.to_parquet(output_filepath, index=False)
         return combined_df
     else:
         return
     
-def process_infer_data(processed_user_path, user_data_path, processed_item_path, livestream_data_path, content_livestream_path, num_user=-1, num_livestream=-1):
+def process_infer_data(processed_user_path, user_data_path, processed_item_path, album_data_path, content_album_path, num_user=-1, num_album=-1):
 
     print("Preprocessing user and item data...")
     preprocess_start = time.time()
     if not os.path.exists(processed_user_path):
         print("  ↪︎ Processing user data...")
-        process_user_data(user_data_path, output_dir="livestream/infer_data", num_user=num_user, mode='infer')
+        process_user_data(user_data_path, output_dir="album/infer_data", num_user=num_user, mode='infer')
     else:
         print("  ↪︎ User data already exists, skipping preprocessing.")
     if not os.path.exists(processed_item_path):
         print("  ↪︎ Processing item data...")
-        process_livestream_item(livestream_data_path, output_dir="livestream/infer_data", num_livestream=num_livestream, mode='infer')
+        process_album_item(album_data_path, output_dir="album/infer_data", num_album=num_album, mode='infer')
     else:
         print("  ↪︎ Item data already exists, skipping preprocessing.")
     print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
 
     print("\nLoading user and item data...")
     user_df = pd.read_parquet(processed_user_path)
-    livestream_df = pd.read_parquet(processed_item_path)
+    album_df = pd.read_parquet(processed_item_path)
 
     project_root = Path().resolve()
-    duration_dir = os.path.join(project_root, "livestream/merged_duration")
+    duration_dir = os.path.join(project_root, "album/merged_duration")
     durations = glob.glob(os.path.join(duration_dir, "*.parquet"))
     user_profile_list = []
     for duration in durations:
@@ -116,15 +131,15 @@ def process_infer_data(processed_user_path, user_data_path, processed_item_path,
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
     print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
 
-    livestream_pl = pl.from_pandas(livestream_df)
-    total_contents = livestream_pl.height
+    album_pl = pl.from_pandas(album_df)
+    total_contents = album_pl.height
     print(f"\nTotal unique contents: {total_contents:,}")
 
-    content_livestream_pl = pl.read_parquet(content_livestream_path)
+    content_album_pl = pl.read_parquet(content_album_path)
     content_unique = (
-        content_livestream_pl
+        content_album_pl
         .unique(subset=['content_id'])
         .select(['content_id', 'content_name', 'tag_names', 'type_id'])
     )
     content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
-    return user_profile_df, livestream_pl, content_dict
+    return user_profile_df, album_pl, content_dict
