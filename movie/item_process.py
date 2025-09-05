@@ -91,10 +91,11 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     movie_df["content_publish_year"] = movie_df["content_publish_year"].fillna(movie_df["content_publish_year"].mean())
 
     ############################
-    #movie_df = movie_df[movie_df["content_single"] == "1"]
+    movie_df = movie_df[movie_df["content_single"] == "1"]
     ##########################
 
-    cols = ['content_id','content_single',
+    cols = ['content_id',
+            #'content_single',
             'content_publish_year', 
             'content_country',
             'type_id','tag_names','content_duration','content_status',
