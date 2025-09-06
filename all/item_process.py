@@ -49,7 +49,6 @@ def fit_item_encoder(data, single_cols, mlb_col):
 def transform_item_data(data, single_cols, mlb_col):
     ohe = joblib.load(Path("model/all/encoder/item_ohe_single.joblib"))
     mlb = joblib.load(Path("model/all/encoder/item_mlb_cate.joblib"))
-    scaler = joblib.load(ENC_DIR / "item_scaler.joblib")
 
     ohe_arr = ohe.transform(data[single_cols])
     ohe_df = pd.DataFrame(ohe_arr, columns=ohe.get_feature_names_out(single_cols), index=data.index)
