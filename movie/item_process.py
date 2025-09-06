@@ -15,7 +15,7 @@ def split_categories(x):
     return str(x).split(',')
 
 def merge_content_movies(movie_data_path, output_file):
-    movie_files = glob.glob(f'{movie_data_path}/**/content_movie_*.json', recursive=True)
+    movie_files = glob.glob(f'{movie_data_path}/**/content_movie_2*.json', recursive=True)
     all_data = []
     for f in movie_files:
         try:
@@ -90,12 +90,8 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
     movie_df["content_publish_year"] = pd.to_numeric(movie_df["content_publish_year"].astype(str).str[:4], errors='coerce')
     movie_df["content_publish_year"] = movie_df["content_publish_year"].fillna(movie_df["content_publish_year"].mean())
 
-    ############################
-    movie_df = movie_df[movie_df["content_single"] == "1"]
-    ##########################
-
     cols = ['content_id',
-            #'content_single',
+            'content_single',
             'content_publish_year', 
             'content_country',
             'type_id','tag_names','content_duration','content_status',
@@ -123,6 +119,7 @@ def process_movie_item(movie_data_path, output_dir, num_movie=-1, mode='train'):
 
     if 'tag_names' in movie_df.columns:
         movie_df = movie_df.drop('tag_names', axis=1)
+        
     # save final output
     movie_df.to_parquet(full_output_dir / "movie_item_data.parquet", index=False)
 

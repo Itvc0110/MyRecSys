@@ -15,7 +15,7 @@ def split_categories(x):
     return str(x).split(',')
 
 def merge_content_clips(clip_data_path, output_file):
-    clip_files = glob.glob(f'{clip_data_path}/**/content_clip_*.json', recursive=True)
+    clip_files = glob.glob(f'{clip_data_path}/**/content_clip_2*.json', recursive=True)
     all_data = []
     for f in clip_files:
         try:

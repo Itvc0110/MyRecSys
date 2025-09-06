@@ -6,7 +6,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from pathlib import Path
 from datetime import datetime
 
-ENC_DIR = "model/album/encoder"
+ENC_DIR = "model/all/encoder"
 os.makedirs(ENC_DIR, exist_ok=True)
 
 def fit_user_encoder(user_data, cat_cols):

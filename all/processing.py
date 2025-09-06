@@ -1,7 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import cpu_count
 from duration_process import merge_parquet_files
-from item_process import process_album_item
+from item_process import process_all_item
 from user_process import process_user_data
 import glob
 from time import time
@@ -21,23 +21,23 @@ def process_data(output_filepath):
     duration_folder_path = "duration"
     duration_folder_path = os.path.join(project_root, duration_folder_path)
 
-    merged_duration_folder_path = "album/merged_duration"
+    merged_duration_folder_path = "all/merged_duration"
     merged_duration_folder_path = os.path.join(project_root, merged_duration_folder_path)
 
     user_path = "month_mytv_info.parquet"
     user_path = os.path.join(project_root, user_path)
 
-    album_data_path = "mytv_vmp_content"
-    album_data_path = os.path.join(project_root, album_data_path)
+    all_data_path = "mytv_vmp_content"
+    all_data_path = os.path.join(project_root, all_data_path)
 
     durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
     if len(durations)<1:
         merge_parquet_files(duration_folder_path, merged_duration_folder_path)
         durations = glob.glob(os.path.join(merged_duration_folder_path, "*.parquet"))
 
-    user_df = process_user_data(user_path, "album/train_data", mode='train')
-    album_df = process_album_item(album_data_path, "album/train_data", mode='train')
-    album_df['content_id'] = album_df['content_id'].astype(str)
+    user_df = process_user_data(user_path, "all/train_data", mode='train')
+    all_df = process_all_item(all_data_path, "all/train_data", mode='train')
+    all_df['content_id'] = all_df['content_id'].astype(str)
 
     all_merged_data = []
 
@@ -52,19 +52,19 @@ def process_data(output_filepath):
             print(f"   Sample duration content_id: {duration_df['content_id'].head(5).tolist()}")
 
             print(f"User DF rows: {len(user_df)}, unique usernames: {user_df['username'].nunique()}")
-            print(f"seriesDF rows: {len(album_df)}, unique content_id: {album_df['content_id'].nunique()}")
-            print(f"   Sample seriescontent_id: {album_df['content_id'].head(5).tolist()}")
+            print(f"seriesDF rows: {len(all_df)}, unique content_id: {all_df['content_id'].nunique()}")
+            print(f"   Sample seriescontent_id: {all_df['content_id'].head(5).tolist()}")
 
             merged_with_user = pd.merge(duration_df, user_df, on='username', how='inner')
             print(f"→ After user merge: {len(merged_with_user)}")
             print(f"   Unique usernames after merge: {merged_with_user['username'].nunique()}")
 
-            final_merged = pd.merge(merged_with_user, album_df, on='content_id', how='inner')
+            final_merged = pd.merge(merged_with_user, all_df, on='content_id', how='inner')
             print(f"→ After seriesmerge: {len(final_merged)}")
             print(f"   Unique content_id after merge: {final_merged['content_id'].nunique()}")
 
             # Optional: check overlap explicitly
-            overlap = set(duration_df['content_id']).intersection(set(album_df['content_id']))
+            overlap = set(duration_df['content_id']).intersection(set(all_df['content_id']))
             print(f"   Overlap content_id count: {len(overlap)}")
             if overlap:
                 print(f"   Sample overlap content_id: {list(overlap)[:5]}")
@@ -100,28 +100,28 @@ def process_data(output_filepath):
     else:
         return
     
-def process_infer_data(processed_user_path, user_data_path, processed_item_path, album_data_path, content_album_path, num_user=-1, num_album=-1):
+def process_infer_data(processed_user_path, user_data_path, processed_item_path, all_data_path, content_all_path, num_user=-1, num_all=-1):
 
     print("Preprocessing user and item data...")
     preprocess_start = time.time()
     if not os.path.exists(processed_user_path):
         print("  ↪︎ Processing user data...")
-        process_user_data(user_data_path, output_dir="album/infer_data", num_user=num_user, mode='infer')
+        process_user_data(user_data_path, output_dir="all/infer_data", num_user=num_user, mode='infer')
     else:
         print("  ↪︎ User data already exists, skipping preprocessing.")
     if not os.path.exists(processed_item_path):
         print("  ↪︎ Processing item data...")
-        process_album_item(album_data_path, output_dir="album/infer_data", num_album=num_album, mode='infer')
+        process_all_item(all_data_path, output_dir="all/infer_data", num_all=num_all, mode='infer')
     else:
         print("  ↪︎ Item data already exists, skipping preprocessing.")
     print(f"Preprocessing completed in {time.time()-preprocess_start:.2f} seconds")
 
     print("\nLoading user and item data...")
     user_df = pd.read_parquet(processed_user_path)
-    album_df = pd.read_parquet(processed_item_path)
+    all_df = pd.read_parquet(processed_item_path)
 
     project_root = Path().resolve()
-    duration_dir = os.path.join(project_root, "album/merged_duration")
+    duration_dir = os.path.join(project_root, "all/merged_duration")
     durations = glob.glob(os.path.join(duration_dir, "*.parquet"))
     user_profile_list = []
     for duration in durations:
@@ -131,15 +131,15 @@ def process_infer_data(processed_user_path, user_data_path, processed_item_path,
     user_profile_df = user_profile_df.merge(user_df, on="username", how="inner")
     print(f"Data loaded in {time.time()-preprocess_start:.2f} seconds")
 
-    album_pl = pl.from_pandas(album_df)
-    total_contents = album_pl.height
+    all_pl = pl.from_pandas(all_df)
+    total_contents = all_pl.height
     print(f"\nTotal unique contents: {total_contents:,}")
 
-    content_album_pl = pl.read_parquet(content_album_path)
+    content_all_pl = pl.read_parquet(content_all_path)
     content_unique = (
-        content_album_pl
+        content_all_pl
         .unique(subset=['content_id'])
         .select(['content_id', 'content_name', 'tag_names', 'type_id'])
     )
     content_dict = {row[0]: (row[1], row[2], row[3]) for row in content_unique.iter_rows()}
-    return user_profile_df, album_pl, content_dict
+    return user_profile_df, all_pl, content_dict

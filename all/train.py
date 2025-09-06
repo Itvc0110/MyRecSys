@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3, TriBCE_Loss, Weighted_TriBCE_Loss
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
-model_save_dir = os.path.join(Path().resolve(), "model/album")
+model_save_dir = os.path.join(Path().resolve(), "model/all")
 os.makedirs(model_save_dir, exist_ok=True)
 
 def print_class_distribution(y_data, name):
@@ -35,7 +35,7 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
     auc_scores = []
 
     project_root = Path().resolve()
-    model_path = "model/album/best_model.pth"
+    model_path = "model/all/best_model.pth"
     model_path = os.path.join(project_root, model_path)
 
     best_val_loss = float('inf')  
@@ -97,7 +97,7 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
             best_val_loss = val_loss
             early_stop_counter = 0
             if best_val_loss < best_previous_loss:
-                save_checkpoint(model, epoch, optimizer, best_val_loss, path="model/album/best_model.pth")
+                save_checkpoint(model, epoch, optimizer, best_val_loss, path="model/all/best_model.pth")
         else:
             early_stop_counter += 1
             if early_stop_counter >= patience:
@@ -157,7 +157,7 @@ def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
 
 if __name__ == "__main__":
     project_root = Path().resolve()
-    data_path = "album/train_data/merged_user_item_duration.parquet"
+    data_path = "all/train_data/merged_user_item_duration.parquet"
     data_path = os.path.join(project_root, data_path)
     if os.path.exists(data_path):
         data = pd.read_parquet(data_path)

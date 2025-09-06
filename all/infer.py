@@ -57,31 +57,31 @@ if __name__ == "__main__":
     TOP_N = 200
 
     project_root = Path().resolve()
-    os.makedirs(project_root / "album" / "result", exist_ok=True)
-    os.makedirs(project_root / "album" / "infer_data", exist_ok=True)
+    os.makedirs(project_root / "all" / "result", exist_ok=True)
+    os.makedirs(project_root / "all" / "infer_data", exist_ok=True)
 
     # File paths
     user_data_path = os.path.join(project_root, "month_mytv_info.parquet")
-    album_data_path = os.path.join(project_root, "mytv_vmp_content")
-    processed_user_path = os.path.join(project_root, "album/infer_data/user_data.parquet")
-    processed_item_path = os.path.join(project_root, "album/infer_data/album_item_data.parquet")
-    content_album_path = os.path.join(project_root, "album/infer_data/merged_content_albums.parquet")
+    all_data_path = os.path.join(project_root, "mytv_vmp_content")
+    processed_user_path = os.path.join(project_root, "all/infer_data/user_data.parquet")
+    processed_item_path = os.path.join(project_root, "all/infer_data/all_item_data.parquet")
+    content_all_path = os.path.join(project_root, "all/infer_data/merged_content_alls.parquet")
     tags_path = os.path.join(project_root, "tags")
     rule_info_path = os.path.join(project_root, "rule_info.parquet")
-    result_json_path = os.path.join(project_root, "album/result/result.json")
-    rulename_json_path = os.path.join(project_root, "album/result/rulename.json")
-    rule_content_path = os.path.join(project_root, "album/result/rule_content.txt")
+    result_json_path = os.path.join(project_root, "all/result/result.json")
+    rulename_json_path = os.path.join(project_root, "all/result/rulename.json")
+    rule_content_path = os.path.join(project_root, "all/result/rule_content.txt")
 
     # Load model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    checkpoint_path = os.path.join(project_root, "model/album/best_model.pth")
+    checkpoint_path = os.path.join(project_root, "model/all/best_model.pth")
     checkpoint = torch.load(checkpoint_path, map_location=device)
     expected_input_dim = checkpoint["model_state_dict"]["ECN.dfc.weight"].shape[1]
     model = DCNv3(expected_input_dim)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
 
-    user_profile_df, album_pl, content_dict = process_infer_data(processed_user_path, user_data_path, processed_item_path, album_data_path, content_album_path, num_user=-1, num_album=-1)
+    user_profile_df, all_pl, content_dict = process_infer_data(processed_user_path, user_data_path, processed_item_path, all_data_path, content_all_path, num_user=-1, num_all=-1)
     
     user_batch_size = 30
     num_users = len(user_profile_df)
@@ -99,7 +99,7 @@ if __name__ == "__main__":
 
         cross_start = time.time()
         user_chunk_pl = pl.from_pandas(user_chunk)
-        cross_df = user_chunk_pl.join(album_pl, how="cross")
+        cross_df = user_chunk_pl.join(all_pl, how="cross")
 
         exclude = {"username", "content_id", "profile_id"}
         to_convert = [col for col in cross_df.columns if col not in exclude]
@@ -175,11 +175,11 @@ if __name__ == "__main__":
             rulename_json_file['d'] = ','.join(rulename_json_file['d'])
             homepage_rule.append(rulename_json_file)
 
-        with open(project_root / f"album/result/result_chunk_{i+1}.json", 'w', encoding='utf-8') as f:
+        with open(project_root / f"all/result/result_chunk_{i+1}.json", 'w', encoding='utf-8') as f:
             json.dump(result_with_rule, f, indent=4, ensure_ascii=False)
-        with open(project_root / f"album/result/rulename_chunk_{i+1}.json", 'w', encoding='utf-8') as f:
+        with open(project_root / f"all/result/rulename_chunk_{i+1}.json", 'w', encoding='utf-8') as f:
             json.dump(homepage_rule, f, indent=4, ensure_ascii=False)
-        with open(project_root / f"album/result/rule_content_chunk_{i+1}.txt", "w", encoding='utf-8') as f:
+        with open(project_root / f"all/result/rule_content_chunk_{i+1}.txt", "w", encoding='utf-8') as f:
             f.write(rule_content)
         print(f"  ↪︎ Saved chunk files in {time.time()-save_start:.2f} seconds")
 
@@ -195,11 +195,11 @@ if __name__ == "__main__":
     final_rulename = []
     final_rule_content = ""
     for i in range(num_chunks):
-        with open(project_root / f"album/result/result_chunk_{i+1}.json", 'r', encoding='utf-8') as f:
+        with open(project_root / f"all/result/result_chunk_{i+1}.json", 'r', encoding='utf-8') as f:
             final_result.update(json.load(f))
-        with open(project_root / f"album/result/rulename_chunk_{i+1}.json", 'r', encoding='utf-8') as f:
+        with open(project_root / f"all/result/rulename_chunk_{i+1}.json", 'r', encoding='utf-8') as f:
             final_rulename.extend(json.load(f))
-        with open(project_root / f"album/result/rule_content_chunk_{i+1}.txt", 'r', encoding='utf-8') as f:
+        with open(project_root / f"all/result/rule_content_chunk_{i+1}.txt", 'r', encoding='utf-8') as f:
             final_rule_content += f.read()
 
     with open(result_json_path, 'w', encoding='utf-8') as f:
