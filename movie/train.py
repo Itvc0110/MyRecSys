@@ -27,14 +27,23 @@ def print_class_distribution(y_data, name):
         percent = (count / total) * 100
         print(f"  Class {label}: {count} samples ({percent:.2f}%)")
 
-def precision_recall_at_k(y_true, y_scores, k):
-    order = np.argsort(y_scores)[::-1]
-    y_true_sorted = y_true[order]
-    top_k = y_true_sorted[:k]
-    tp = np.sum(top_k)
-    precision_at_k = tp / k
-    recall_at_k = tp / np.sum(y_true) if np.sum(y_true) > 0 else 0.0
-    return precision_at_k, recall_at_k
+def user_level_precision_recall_at_k(y_true, y_scores, user_ids, k):
+    """Compute macro-averaged Precision@K and Recall@K per user."""
+    df = pd.DataFrame({
+        "user": user_ids,
+        "y_true": y_true,
+        "y_score": y_scores
+    })
+    precisions, recalls = [], []
+    for _, group in df.groupby("user"):
+        group_sorted = group.sort_values("y_score", ascending=False)
+        top_k = group_sorted.head(min(k, len(group_sorted)))
+        tp = top_k["y_true"].sum()
+        total_positives = group["y_true"].sum()
+        precisions.append(tp / k)  # divide by fixed k for consistency
+        recalls.append(tp / total_positives if total_positives > 0 else 0.0)
+    return np.mean(precisions), np.mean(recalls)
+
 
 def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10, patience=3):
     train_losses = []
@@ -118,9 +127,10 @@ def validate(model, val_loader, loss_fn, device):
     val_loss = 0.0
     all_y_true = []
     all_y_scores = []
+    all_user_ids = []
 
     with torch.no_grad():
-        for inputs, labels in val_loader:
+        for inputs, labels, users in val_loader:
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -130,6 +140,7 @@ def validate(model, val_loader, loss_fn, device):
 
             all_y_true.extend(labels.detach().cpu().numpy())
             all_y_scores.extend(output['y_pred'].detach().cpu().numpy())
+            all_user_ids.extend(users.detach().cpu().numpy())
 
     all_y_true = np.array(all_y_true).flatten()
     all_y_scores = np.array(all_y_scores).flatten()
@@ -144,8 +155,8 @@ def validate(model, val_loader, loss_fn, device):
     auc = roc_auc_score(all_y_true, all_y_scores)
     accuracy = accuracy_score(all_y_true, y_pred)
 
-    p20, r20 = precision_recall_at_k(all_y_true, all_y_scores, 20)
-    p100, r100 = precision_recall_at_k(all_y_true, all_y_scores, 100)
+    p20, r20 = user_level_precision_recall_at_k(all_y_true, all_y_scores, all_user_ids, 20)
+    p100, r100 = user_level_precision_recall_at_k(all_y_true, all_y_scores, all_user_ids, 100)
 
     print(f'\nValidation Loss: {avg_val_loss:.4f}')
     print(f'Accuracy: {accuracy:.4f}')
