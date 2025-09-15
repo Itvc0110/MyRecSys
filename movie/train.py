@@ -13,7 +13,7 @@ from processing import process_data
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3, TriBCE_Loss, Weighted_TriBCE_Loss
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, accuracy_score
 
 model_save_dir = os.path.join(Path().resolve(), "model/movie")
 os.makedirs(model_save_dir, exist_ok=True)
@@ -26,6 +26,15 @@ def print_class_distribution(y_data, name):
         count = class_counts[label]
         percent = (count / total) * 100
         print(f"  Class {label}: {count} samples ({percent:.2f}%)")
+
+def precision_recall_at_k(y_true, y_scores, k):
+    order = np.argsort(y_scores)[::-1]
+    y_true_sorted = y_true[order]
+    top_k = y_true_sorted[:k]
+    tp = np.sum(top_k)
+    precision_at_k = tp / k
+    recall_at_k = tp / np.sum(y_true) if np.sum(y_true) > 0 else 0.0
+    return precision_at_k, recall_at_k
 
 def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10, patience=3):
     train_losses = []
@@ -129,16 +138,23 @@ def validate(model, val_loader, loss_fn, device):
 
     y_pred = (all_y_scores > 0.5).astype(int)
 
-    precision = precision_score(all_y_true, y_pred, zero_division=0)
-    recall = recall_score(all_y_true, y_pred, zero_division=0)
-    f1 = f1_score(all_y_true, y_pred, zero_division=0)
+    precision = precision_score(all_y_true, y_pred, zero_division=0, pos_label=1)
+    recall = recall_score(all_y_true, y_pred, zero_division=0, pos_label=1)
+    f1 = f1_score(all_y_true, y_pred, zero_division=0, pos_label=1)
     auc = roc_auc_score(all_y_true, all_y_scores)
+    accuracy = accuracy_score(all_y_true, y_pred)
+
+    p20, r20 = precision_recall_at_k(all_y_true, all_y_scores, 20)
+    p100, r100 = precision_recall_at_k(all_y_true, all_y_scores, 100)
 
     print(f'\nValidation Loss: {avg_val_loss:.4f}')
+    print(f'Accuracy: {accuracy:.4f}')
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')
-    print(f'AUC: {auc:.4f}\n')
+    print(f'AUC: {auc:.4f}')
+    print(f'Precision@20: {p20:.4f} | Recall@20: {r20:.4f}')
+    print(f'Precision@100: {p100:.4f} | Recall@100: {r100:.4f}\n')
 
     model.train()  
     return avg_val_loss  
