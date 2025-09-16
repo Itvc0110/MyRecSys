@@ -13,7 +13,7 @@ from processing import process_data
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from dcnv3 import DCNv3, TriBCE_Loss, Weighted_TriBCE_Loss
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, accuracy_score
 
 model_save_dir = os.path.join(Path().resolve(), "model/music")
 os.makedirs(model_save_dir, exist_ok=True)
@@ -75,10 +75,11 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
 
         y_pred = (all_y_scores > 0.5).astype(int)
 
-        precision = precision_score(all_y_true, y_pred, zero_division=0)
-        recall = recall_score(all_y_true, y_pred, zero_division=0)
-        f1 = f1_score(all_y_true, y_pred, zero_division=0)
+        precision = precision_score(all_y_true, y_pred, zero_division=0, pos_label=1)
+        recall = recall_score(all_y_true, y_pred, zero_division=0, pos_label=1)
+        f1 = f1_score(all_y_true, y_pred, zero_division=0, pos_label=1)
         auc = roc_auc_score(all_y_true, all_y_scores)
+        accuracy = accuracy_score(all_y_true, all_y_scores)
 
         precisions.append(precision)
         recalls.append(recall)
@@ -133,8 +134,10 @@ def validate(model, val_loader, loss_fn, device):
     recall = recall_score(all_y_true, y_pred, zero_division=0)
     f1 = f1_score(all_y_true, y_pred, zero_division=0)
     auc = roc_auc_score(all_y_true, all_y_scores)
+    accuracy = accuracy_score(all_y_true, all_y_scores)
 
     print(f'\nValidation Loss: {avg_val_loss:.4f}')
+    print(f'\nAccuracy: {accuracy:.4f}')
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')

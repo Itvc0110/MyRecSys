@@ -27,24 +27,6 @@ def print_class_distribution(y_data, name):
         percent = (count / total) * 100
         print(f"  Class {label}: {count} samples ({percent:.2f}%)")
 
-def user_level_precision_recall_at_k(y_true, y_scores, user_ids, k):
-    """Compute macro-averaged Precision@K and Recall@K per user."""
-    df = pd.DataFrame({
-        "user": user_ids,
-        "y_true": y_true,
-        "y_score": y_scores
-    })
-    precisions, recalls = [], []
-    for _, group in df.groupby("user"):
-        group_sorted = group.sort_values("y_score", ascending=False)
-        top_k = group_sorted.head(min(k, len(group_sorted)))
-        tp = top_k["y_true"].sum()
-        total_positives = group["y_true"].sum()
-        precisions.append(tp / k)  # divide by fixed k for consistency
-        recalls.append(tp / total_positives if total_positives > 0 else 0.0)
-    return np.mean(precisions), np.mean(recalls)
-
-
 def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10, patience=3):
     train_losses = []
     precisions = []
@@ -155,17 +137,12 @@ def validate(model, val_loader, loss_fn, device):
     auc = roc_auc_score(all_y_true, all_y_scores)
     accuracy = accuracy_score(all_y_true, y_pred)
 
-    p20, r20 = user_level_precision_recall_at_k(all_y_true, all_y_scores, all_user_ids, 20)
-    p100, r100 = user_level_precision_recall_at_k(all_y_true, all_y_scores, all_user_ids, 100)
-
     print(f'\nValidation Loss: {avg_val_loss:.4f}')
     print(f'Accuracy: {accuracy:.4f}')
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')
     print(f'AUC: {auc:.4f}')
-    print(f'Precision@20: {p20:.4f} | Recall@20: {r20:.4f}')
-    print(f'Precision@100: {p100:.4f} | Recall@100: {r100:.4f}\n')
 
     model.train()  
     return avg_val_loss  
