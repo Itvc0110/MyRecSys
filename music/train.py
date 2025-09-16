@@ -134,7 +134,7 @@ def validate(model, val_loader, loss_fn, device):
     recall = recall_score(all_y_true, y_pred, zero_division=0)
     f1 = f1_score(all_y_true, y_pred, zero_division=0)
     auc = roc_auc_score(all_y_true, all_y_scores)
-    accuracy = accuracy_score(all_y_true, all_y_scores)
+    accuracy = accuracy_score(all_y_true, y_pred)
 
     print(f'\nValidation Loss: {avg_val_loss:.4f}')
     print(f'\nAccuracy: {accuracy:.4f}')
