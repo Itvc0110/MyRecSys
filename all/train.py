@@ -79,6 +79,7 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
         recall = recall_score(all_y_true, y_pred, zero_division=0)
         f1 = f1_score(all_y_true, y_pred, zero_division=0)
         auc = roc_auc_score(all_y_true, all_y_scores)
+        accuracy = accuracy_score(all_y_true, y_pred)
 
         precisions.append(precision)
         recalls.append(recall)
@@ -86,6 +87,7 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
         auc_scores.append(auc)
 
         print(f'Epoch {epoch + 1}/{epochs} - Training Loss: {avg_train_loss:.4f}')
+        print(f'\nAccuracy: {accuracy:.4f}')
         print(f'Precision: {precision:.4f}')
         print(f'Recall: {recall:.4f}')
         print(f'F1 Score: {f1:.4f}')
@@ -173,11 +175,12 @@ if __name__ == "__main__":
     y = train_data["label"]
     X = train_data.drop(columns=["label"])
     
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, #stratify=y, 
+                                                      random_state=50)
 
     raw_root = (len(y) - y.sum()) / y.sum()
     pos_weight = raw_root
-    #pos_weight = math.sqrt(pos_weight)
+    pos_weight = math.sqrt(pos_weight)
 
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
