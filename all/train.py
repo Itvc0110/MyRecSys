@@ -160,7 +160,7 @@ def save_checkpoint(model, epoch, optimizer, loss, path="model_checkpoint.pth"):
         'loss': loss
     }
     torch.save(checkpoint, model_path)
-    print(f"Checkpoint saved at epoch {epoch}")
+    print(f"Checkpoint saved at epoch {epoch+1}")
 
 if __name__ == "__main__":
     project_root = Path().resolve()

@@ -13,7 +13,7 @@ class ExponentialCrossNetwork(nn.Module):
                  input_dim,
                  num_cross_layers=3,
                  layer_norm=True,
-                 batch_norm=False,
+                 batch_norm=True,
                  net_dropout=0.1):
         super(ExponentialCrossNetwork, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
