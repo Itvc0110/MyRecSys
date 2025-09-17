@@ -74,7 +74,7 @@ class ExponentialCrossNetwork(nn.Module):
                 pad = H.new_zeros(H.size(0), pad_size)
                 H = torch.cat([H, pad], dim=-1)
             x = x0 * (H + self.b[i]) + x
-            x = torch.clamp(x, min=-100, max=100)
+            #x = torch.clamp(x, min=-100, max=100)
             x = x / (torch.norm(x, p=2, dim=-1, keepdim=True) + 1e-12)
             if len(self.dropout) > i:
                 x = self.dropout[i](x)
@@ -150,7 +150,7 @@ class LinearCrossNetwork(nn.Module):
                 H = torch.cat([H, pad], dim=-1)
 
             x = x0 * (H + self.b[i]) + x
-            x = torch.clamp(x, min=-100, max=100)
+            #x = torch.clamp(x, min=-100, max=100)
             x = x / (torch.norm(x, p=2, dim=-1, keepdim=True) + 1e-12)
             if len(self.dropout) > i:
                 x = self.dropout[i](x)
