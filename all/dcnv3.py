@@ -82,7 +82,7 @@ class ExponentialCrossNetwork(nn.Module):
                 pad_size = self.input_dim - H.shape[-1]
                 pad = H.new_zeros(H.size(0), pad_size)
                 H = torch.cat([H, pad], dim=-1)
-            x = x0 * (H + self.b[i]) + x
+            x = x * (H + self.b[i]) + x
             x = torch.clamp(x, min=-10, max=10)
             x = x / (torch.norm(x, p=2, dim=-1, keepdim=True) + 1e-12)
             if len(self.dropout) > i:
@@ -219,7 +219,7 @@ class DCNv3(nn.Module):
         feature_emb = inputs
         dlogit = self.ECN(feature_emb).mean(dim=1)
         slogit = self.LCN(feature_emb).mean(dim=1)
-        logit = (dlogit*2 + slogit) / 3
+        logit = (dlogit + slogit) * 0.5
     
         y_pred = self.output_activation(logit)
         y_d = self.output_activation(dlogit)
