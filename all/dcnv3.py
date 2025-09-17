@@ -46,7 +46,14 @@ class ExponentialCrossNetwork(nn.Module):
             nn.init.uniform_(self.b[i].data)
             
         self.masker = nn.ReLU().to(self.device)
-        self.dfc = nn.Linear(input_dim, 1).to(self.device)
+
+        self.dfc = nn.Sequential(
+                        nn.Linear(input_dim, input_dim // 2),
+                        nn.ReLU(),
+                        nn.Dropout(0.1),
+                        nn.Linear(input_dim // 2, 1)
+                    ).to(self.device)
+        
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -59,7 +66,6 @@ class ExponentialCrossNetwork(nn.Module):
 
     def forward(self, x):
         x = x.to(self.device)
-        x0 = x
 
         for i in range(self.num_cross_layers):
             H = self.w[i](x)
@@ -129,7 +135,14 @@ class LinearCrossNetwork(nn.Module):
             nn.init.uniform_(self.b[i].data)
             
         self.masker = nn.ReLU().to(self.device)
-        self.sfc = nn.Linear(input_dim, 1).to(self.device)
+
+        self.sfc = nn.Sequential(
+                                nn.Linear(input_dim, input_dim // 2),
+                                nn.ReLU(),
+                                nn.Dropout(0.1),
+                                nn.Linear(input_dim // 2, 1)
+                            ).to(self.device)
+        
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
