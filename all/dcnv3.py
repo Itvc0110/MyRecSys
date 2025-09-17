@@ -162,8 +162,8 @@ class LinearCrossNetwork(nn.Module):
 class DCNv3(nn.Module):
     def __init__(self,
                  input_dim,
-                 num_deep_cross_layers=3,
-                 num_shallow_cross_layers=3,
+                 num_deep_cross_layers=2,
+                 num_shallow_cross_layers=4,
                  deep_net_dropout=0.1,
                  shallow_net_dropout=0.1,
                  layer_norm=True,
