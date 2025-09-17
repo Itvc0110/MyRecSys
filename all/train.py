@@ -6,7 +6,6 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import time
-import math
 
 from pathlib import Path
 from torch import nn
@@ -181,10 +180,6 @@ if __name__ == "__main__":
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.3, stratify=y, random_state=42)
 
-    raw_root = (len(y) - y.sum()) / y.sum()
-    pos_weight = raw_root
-    pos_weight = math.sqrt(pos_weight)
-
     print_class_distribution(pd.Series(y_train), "Training")
     print_class_distribution(pd.Series(y_val), "Validation")
 
@@ -212,7 +207,7 @@ if __name__ == "__main__":
 
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scheduler = CosineAnnealingLR(optimizer, T_max=30)
-    loss_fn = TriBCE_Loss()
+    loss_fn = Weighted_TriBCE_Loss()
 
     start_time = time.time()
     for i in range(5):

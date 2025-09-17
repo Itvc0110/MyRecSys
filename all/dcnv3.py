@@ -232,26 +232,30 @@ class TriBCE_Loss(nn.Module):
         return loss
 
 class Weighted_TriBCE_Loss(nn.Module):
-    def __init__(self, pos_weight=1.0):
+    def __init__(self, reduction="mean"):
         super(Weighted_TriBCE_Loss, self).__init__()
-        self.pos_weight = pos_weight
+        self.reduction = reduction
 
     def forward(self, y_pred, y_true, y_d, y_s):
-        sample_weight = torch.where(y_true == 1, self.pos_weight, 1.0)
+        pos_count = torch.sum(y_true)
+        neg_count = y_true.numel() - pos_count
 
-        bce_loss = nn.BCELoss(weight=sample_weight)
-        
-        # compute losses
+        pos_count = torch.clamp(pos_count, min=1.0)
+        neg_count = torch.clamp(neg_count, min=1.0)
+
+        pos_weight = neg_count / (pos_count + neg_count)
+        neg_weight = pos_count / (pos_count + neg_count)
+
+        sample_weight = torch.where(y_true == 1, pos_weight, neg_weight)
+
+        bce_loss = nn.BCELoss(weight=sample_weight, reduction=self.reduction)
+
         loss = bce_loss(y_pred, y_true)
         loss_d = bce_loss(y_d, y_true)
         loss_s = bce_loss(y_s, y_true)
-        
-        # compute weights for deep and shallow losses
-        weight_d = loss_d - loss
-        weight_s = loss_s - loss
-        weight_d = torch.where(weight_d > 0, weight_d, torch.zeros_like(weight_d))
-        weight_s = torch.where(weight_s > 0, weight_s, torch.zeros_like(weight_s))
-        
-        # combine losses
+
+        weight_d = torch.where(loss_d > loss, loss_d - loss, torch.zeros_like(loss_d))
+        weight_s = torch.where(loss_s > loss, loss_s - loss, torch.zeros_like(loss_s))
+
         loss = loss + loss_d * weight_d + loss_s * weight_s
         return loss
