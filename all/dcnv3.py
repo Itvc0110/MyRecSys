@@ -23,7 +23,7 @@ class ExponentialCrossNetwork(nn.Module):
         self.dropout = nn.ModuleList()
         self.w = nn.ModuleList()
         self.b = nn.ParameterList()
-        self.gates = nn.ModuleList()  
+        self.gates = nn.ModuleList()
         
         # compute split size
         self.input_dim = input_dim
@@ -33,10 +33,10 @@ class ExponentialCrossNetwork(nn.Module):
             w_layer = nn.Linear(input_dim, self.half, bias=False).to(self.device)
             self.w.append(w_layer)
             self.b.append(nn.Parameter(torch.zeros((input_dim,), device=self.device)))
-            
+
             gate_layer = nn.Linear(self.half, self.half).to(self.device)
             self.gates.append(gate_layer)
-            
+
             if layer_norm:
                 self.layer_norm.append(nn.LayerNorm(self.half).to(self.device))
             if batch_norm:
@@ -71,12 +71,12 @@ class ExponentialCrossNetwork(nn.Module):
                 mask = self.masker(norm_H)
             else:
                 mask = self.masker(H)
-            
+
             gate = torch.sigmoid(self.gates[i](H))
-            H_gated = H * gate
-            
+            H = H * gate 
+
             # concatenate and pad if necessary
-            H = torch.cat([H_gated, H_gated * mask], dim=-1)
+            H = torch.cat([H, H * mask], dim=-1)
 
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
@@ -106,8 +106,9 @@ class LinearCrossNetwork(nn.Module):
         self.dropout = nn.ModuleList()
         self.w = nn.ModuleList()
         self.b = nn.ParameterList()
-        self.gates = nn.ModuleList()  
-        
+        self.gates = nn.ModuleList()
+
+        # compute split size
         self.input_dim = input_dim
         self.half = input_dim // 2
         
@@ -115,8 +116,7 @@ class LinearCrossNetwork(nn.Module):
             w_layer = nn.Linear(input_dim, self.half, bias=False).to(self.device)
             self.w.append(w_layer)
             self.b.append(nn.Parameter(torch.zeros((input_dim,), device=self.device)))
-            
-            # New: Gate linear layer
+
             gate_layer = nn.Linear(self.half, self.half).to(self.device)
             self.gates.append(gate_layer)
             
@@ -156,9 +156,10 @@ class LinearCrossNetwork(nn.Module):
                 mask = self.masker(H)
 
             gate = torch.sigmoid(self.gates[i](H))
-            H_gated = H * gate
-            
-            H = torch.cat([H_gated, H_gated * mask], dim=-1)
+            H = H * gate        
+
+            # concatenate and pad if necessary
+            H = torch.cat([H, H * mask], dim=-1)
             if H.shape[-1] != self.input_dim:
                 pad_size = self.input_dim - H.shape[-1]
                 pad = H.new_zeros(H.size(0), pad_size)
@@ -173,54 +174,13 @@ class LinearCrossNetwork(nn.Module):
         logit = self.sfc(x)
         return logit
 
-
-class DenseCrossNetwork(nn.Module):  
-    def __init__(self, input_dim, num_layers=3, dropout=0.1):
-        super(DenseCrossNetwork, self).__init__()
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.num_layers = num_layers
-        self.linears = nn.ModuleList()
-        self.scales = nn.ParameterList()
-        self.dropouts = nn.ModuleList()
-        
-        for i in range(num_layers):
-            linear = nn.Linear(input_dim, input_dim, bias=False).to(self.device)
-            self.linears.append(linear)
-            self.scales.append(nn.Parameter(torch.ones(1, device=self.device)))
-            if dropout > 0:
-                self.dropouts.append(nn.Dropout(dropout).to(self.device))
-        
-        self.dcn_fc = nn.Linear(input_dim, 1).to(self.device)
-        self.apply(self._init_weights)
-
-    def _init_weights(self, module):
-        if isinstance(module, torch.nn.Linear):
-            torch.nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, torch.nn.Embedding):
-            torch.nn.init.xavier_uniform_(module.weight)
-
-    def forward(self, x):
-        x = x.to(self.device)
-        for i in range(self.num_layers):
-            cross = self.scales[i] * (self.linears[i](x) * x)
-            x = cross + x  
-            if len(self.dropouts) > i:
-                x = self.dropouts[i](x)
-        logit = self.dcn_fc(x)
-        return logit
-
-
 class DCNv3(nn.Module):
     def __init__(self,
                  input_dim,
-                 num_deep_cross_layers=3,
-                 num_shallow_cross_layers=3,
-                 num_dense_layers=3,  
+                 num_deep_cross_layers=2,
+                 num_shallow_cross_layers=4,
                  deep_net_dropout=0.1,
                  shallow_net_dropout=0.1,
-                 dense_dropout=0.1,  
                  layer_norm=True,
                  batch_norm=True):
         super(DCNv3, self).__init__()
@@ -242,12 +202,6 @@ class DCNv3(nn.Module):
             batch_norm=batch_norm
         ).to(self.device)
         
-        self.DCN = DenseCrossNetwork(
-            input_dim=input_dim,
-            num_layers=num_dense_layers,
-            dropout=dense_dropout
-        ).to(self.device)
-        
         self.apply(self._init_weights)
         self.output_activation = torch.sigmoid
 
@@ -265,18 +219,15 @@ class DCNv3(nn.Module):
         feature_emb = inputs
         dlogit = self.ECN(feature_emb).mean(dim=1)
         slogit = self.LCN(feature_emb).mean(dim=1)
-        dcn_logit = self.DCN(feature_emb).mean(dim=1)  
-        logit = (dlogit + slogit + dcn_logit) / 3  
+        logit = (dlogit + slogit) * 0.5
     
         y_pred = self.output_activation(logit)
         y_d = self.output_activation(dlogit)
         y_s = self.output_activation(slogit)
-        y_dc = self.output_activation(dcn_logit)  
         return {
             "y_pred": y_pred,
             "y_d": y_d,
-            "y_s": y_s,
-            "y_dc": y_dc  
+            "y_s": y_s
         }
 
 class TriBCE_Loss(nn.Module):
@@ -295,13 +246,12 @@ class TriBCE_Loss(nn.Module):
         loss = loss + loss_d * weight_d + loss_s * weight_s
         return loss
 
-
 class Weighted_TriBCE_Loss(nn.Module):
     def __init__(self, reduction="mean"):
         super(Weighted_TriBCE_Loss, self).__init__()
         self.reduction = reduction
 
-    def forward(self, y_pred, y_true, y_d, y_s, y_dc=None):  # Optional y_dc for four-way
+    def forward(self, y_pred, y_true, y_d, y_s):
         pos_count = torch.sum(y_true)
         neg_count = y_true.numel() - pos_count
 
@@ -318,15 +268,9 @@ class Weighted_TriBCE_Loss(nn.Module):
         loss = bce_loss(y_pred, y_true)
         loss_d = bce_loss(y_d, y_true)
         loss_s = bce_loss(y_s, y_true)
-        
+
         weight_d = torch.where(loss_d > loss, loss_d - loss, torch.zeros_like(loss_d))
         weight_s = torch.where(loss_s > loss, loss_s - loss, torch.zeros_like(loss_s))
 
         loss = loss + loss_d * weight_d + loss_s * weight_s
-        
-        if y_dc is not None:
-            loss_dc = bce_loss(y_dc, y_true)
-            weight_dc = torch.where(loss_dc > loss, loss_dc - loss, torch.zeros_like(loss_dc))
-            loss += loss_dc * weight_dc
-        
         return loss
