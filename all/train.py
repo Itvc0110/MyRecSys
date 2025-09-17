@@ -212,7 +212,7 @@ if __name__ == "__main__":
 
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scheduler = CosineAnnealingLR(optimizer, T_max=30)
-    loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
+    loss_fn = TriBCE_Loss()
 
     start_time = time.time()
     for i in range(5):
