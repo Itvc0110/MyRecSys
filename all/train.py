@@ -175,7 +175,7 @@ if __name__ == "__main__":
     y = train_data["label"]
     X = train_data.drop(columns=["label"])
     
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, #stratify=y, 
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, 
                                                       random_state=50)
 
     raw_root = (len(y) - y.sum()) / y.sum()

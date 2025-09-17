@@ -164,11 +164,8 @@ class LinearCrossNetwork(nn.Module):
 class DCNv3(nn.Module):
     def __init__(self,
                  input_dim,
-                 gpu=-1,
-                 learning_rate=1e-3,
-                 embedding_dim=10,
-                 num_deep_cross_layers=1,
-                 num_shallow_cross_layers=1,
+                 num_deep_cross_layers=3,
+                 num_shallow_cross_layers=3,
                  deep_net_dropout=0.1,
                  shallow_net_dropout=0.1,
                  layer_norm=True,
@@ -246,8 +243,7 @@ class Weighted_TriBCE_Loss(nn.Module):
 
     def forward(self, y_pred, y_true, y_d, y_s):
         sample_weight = torch.where(y_true == 1, self.pos_weight, 1.0)
-        
-        # define BCE loss with sample weights
+
         bce_loss = nn.BCELoss(weight=sample_weight)
         
         # compute losses
