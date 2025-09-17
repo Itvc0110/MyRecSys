@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import torch
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import time
 import math
@@ -27,7 +28,7 @@ def print_class_distribution(y_data, name):
         percent = (count / total) * 100
         print(f"  Class {label}: {count} samples ({percent:.2f}%)")
 
-def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10, patience=3):
+def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10, patience=3, scheduler=None):
     train_losses = []
     precisions = []
     recalls = []
@@ -94,6 +95,9 @@ def train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=10
         print(f'AUC: {auc:.4f}')
 
         val_loss = validate(model, val_loader, loss_fn, device)
+
+        if scheduler is not None:
+            scheduler.step()
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -207,16 +211,17 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    scheduler = CosineAnnealingLR(optimizer, T_max=20)
     loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
 
     start_time = time.time()
     for i in range(5):
-        print(f"Traing run number: {i+1}")
+        print(f"Training run no.{i+1}")
         epochs = 20
         patience = 3
 
-        train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=epochs, patience=patience)
+        train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=epochs, patience=patience, scheduler=scheduler)
     
     end_time = time.time()
     elapsed = end_time - start_time
