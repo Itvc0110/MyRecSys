@@ -179,8 +179,7 @@ if __name__ == "__main__":
     y = train_data["label"]
     X = train_data.drop(columns=["label"])
     
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, 
-                                                      random_state=50)
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.3, stratify=y, random_state=42)
 
     raw_root = (len(y) - y.sum()) / y.sum()
     pos_weight = raw_root
@@ -212,14 +211,14 @@ if __name__ == "__main__":
     model.to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    scheduler = CosineAnnealingLR(optimizer, T_max=20)
+    scheduler = CosineAnnealingLR(optimizer, T_max=30)
     loss_fn = Weighted_TriBCE_Loss(pos_weight=pos_weight)
 
     start_time = time.time()
     for i in range(5):
         print(f"Training run no.{i+1}")
-        epochs = 20
-        patience = 3
+        epochs = 30
+        patience = 4
 
         train(model, train_loader, val_loader, optimizer, loss_fn, device, epochs=epochs, patience=patience, scheduler=scheduler)
     
