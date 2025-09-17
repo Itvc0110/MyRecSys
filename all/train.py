@@ -12,7 +12,7 @@ from torch import nn
 from processing import process_data
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
-from experient_dcn import DCNv3, TriBCE_Loss, Weighted_TriBCE_Loss
+from dcnv3 import DCNv3, TriBCE_Loss, Weighted_TriBCE_Loss
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, accuracy_score
 
 model_save_dir = os.path.join(Path().resolve(), "model/all")
