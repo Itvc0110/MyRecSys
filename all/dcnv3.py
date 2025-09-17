@@ -164,13 +164,13 @@ class LinearCrossNetwork(nn.Module):
 class DCNv3(nn.Module):
     def __init__(self,
                  input_dim,
-                 num_deep_cross_layers=10,
-                 num_shallow_cross_layers=10,
-                 deep_net_dropout=0,
-                 shallow_net_dropout=0,
+                 num_deep_cross_layers=3,
+                 num_shallow_cross_layers=3,
+                 deep_net_dropout=0.1,
+                 shallow_net_dropout=0.1,
                  layer_norm=True,
-                 batch_norm=False,
-                 num_heads=1):
+                 batch_norm=True,
+                 num_heads=2):
         super(DCNv3, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
