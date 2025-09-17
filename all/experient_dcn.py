@@ -1,12 +1,6 @@
-import pandas as pd
-import numpy as np
 import torch
 from torch import nn
-from processing import process_data
-from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, TensorDataset
 import torch.nn.functional as F
-
 
 class ExponentialCrossNetwork(nn.Module):
     def __init__(self,
@@ -24,18 +18,14 @@ class ExponentialCrossNetwork(nn.Module):
         self.w = nn.ModuleList()
         self.b = nn.ParameterList()
         self.gates = nn.ModuleList()
-        
-        # compute split size
+
         self.input_dim = input_dim
         self.half = input_dim // 2
 
         for i in range(num_cross_layers):
-            w_layer = nn.Linear(input_dim, self.half, bias=False).to(self.device)
-            self.w.append(w_layer)
+            self.w.append(nn.Linear(input_dim, self.half, bias=False).to(self.device))
             self.b.append(nn.Parameter(torch.zeros((input_dim,), device=self.device)))
-
-            gate_layer = nn.Linear(self.half, self.half).to(self.device)
-            self.gates.append(gate_layer)
+            self.gates.append(nn.Linear(self.half, self.half).to(self.device))
 
             if layer_norm:
                 self.layer_norm.append(nn.LayerNorm(self.half).to(self.device))
@@ -43,53 +33,50 @@ class ExponentialCrossNetwork(nn.Module):
                 self.batch_norm.append(nn.BatchNorm1d(self.half).to(self.device))
             if net_dropout > 0:
                 self.dropout.append(nn.Dropout(net_dropout).to(self.device))
-            nn.init.uniform_(self.b[i].data)
-            
-        self.masker = nn.ReLU().to(self.device)
 
-        self.dfc = nn.Linear(input_dim, 1).to(self.device)
-        
+            nn.init.uniform_(self.b[i].data)
+
+        self.masker = nn.ReLU().to(self.device)
+        self.dfc = nn.Sequential(
+            nn.Linear(input_dim, input_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(input_dim // 2, 1)
+        ).to(self.device)
+
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
-        if isinstance(module, torch.nn.Linear):
-            torch.nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+        if isinstance(module, nn.Linear):
+            nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
             if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, torch.nn.Embedding):
-            torch.nn.init.xavier_uniform_(module.weight)
+                nn.init.zeros_(module.bias)
 
     def forward(self, x):
         x = x.to(self.device)
-
         for i in range(self.num_cross_layers):
             H = self.w[i](x)
-
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
             if len(self.layer_norm) > i:
-                norm_H = self.layer_norm[i](H)
-                mask = self.masker(norm_H)
+                mask = self.masker(self.layer_norm[i](H))
             else:
                 mask = self.masker(H)
 
             gate = torch.sigmoid(self.gates[i](H))
-            H = H * gate 
+            H = H * gate
 
-            # concatenate and pad if necessary
-            H = torch.cat([H, H * mask], dim=-1)
+            # Directly expand H back to input_dim with a learned transformation
+            # instead of concatenating and padding
+            H = F.pad(H * mask, (0, self.input_dim - self.half))
 
-            if H.shape[-1] != self.input_dim:
-                pad_size = self.input_dim - H.shape[-1]
-                pad = H.new_zeros(H.size(0), pad_size)
-                H = torch.cat([H, pad], dim=-1)
             x = x * (H + self.b[i]) + x
             x = torch.clamp(x, min=-10, max=10)
             x = x / (torch.norm(x, p=2, dim=-1, keepdim=True) + 1e-12)
             if len(self.dropout) > i:
                 x = self.dropout[i](x)
-        logit = self.dfc(x)
-        return logit
+
+        return self.dfc(x)
 
 
 class LinearCrossNetwork(nn.Module):
@@ -109,73 +96,64 @@ class LinearCrossNetwork(nn.Module):
         self.b = nn.ParameterList()
         self.gates = nn.ModuleList()
 
-        # compute split size
         self.input_dim = input_dim
         self.half = input_dim // 2
-        
-        for i in range(num_cross_layers):
-            w_layer = nn.Linear(input_dim, self.half, bias=False).to(self.device)
-            self.w.append(w_layer)
-            self.b.append(nn.Parameter(torch.zeros((input_dim,), device=self.device)))
 
-            gate_layer = nn.Linear(self.half, self.half).to(self.device)
-            self.gates.append(gate_layer)
-            
+        for i in range(num_cross_layers):
+            self.w.append(nn.Linear(input_dim, self.half, bias=False).to(self.device))
+            self.b.append(nn.Parameter(torch.zeros((input_dim,), device=self.device)))
+            self.gates.append(nn.Linear(self.half, self.half).to(self.device))
+
             if layer_norm:
                 self.layer_norm.append(nn.LayerNorm(self.half).to(self.device))
             if batch_norm:
                 self.batch_norm.append(nn.BatchNorm1d(self.half).to(self.device))
             if net_dropout > 0:
                 self.dropout.append(nn.Dropout(net_dropout).to(self.device))
-            nn.init.uniform_(self.b[i].data)
-            
-        self.masker = nn.ReLU().to(self.device)
 
-        self.sfc = nn.Linear(input_dim, 1).to(self.device)
-        
+            nn.init.uniform_(self.b[i].data)
+
+        self.masker = nn.ReLU().to(self.device)
+        self.sfc = nn.Sequential(
+            nn.Linear(input_dim, input_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(input_dim // 2, 1)
+        ).to(self.device)
+
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
-        if isinstance(module, torch.nn.Linear):
-            torch.nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+        if isinstance(module, nn.Linear):
+            nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
             if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, torch.nn.Embedding):
-            torch.nn.init.xavier_uniform_(module.weight)
+                nn.init.zeros_(module.bias)
 
     def forward(self, x):
         x = x.to(self.device)
         x0 = x
-
         for i in range(self.num_cross_layers):
             H = self.w[i](x)
-    
             if len(self.batch_norm) > i:
                 H = self.batch_norm[i](H)
             if len(self.layer_norm) > i:
-                norm_H = self.layer_norm[i](H)
-                mask = self.masker(norm_H)
+                mask = self.masker(self.layer_norm[i](H))
             else:
                 mask = self.masker(H)
 
             gate = torch.sigmoid(self.gates[i](H))
-            H = H * gate        
+            H = H * gate
 
-            # concatenate and pad if necessary
-            H = torch.cat([H, H * mask], dim=-1)
-            if H.shape[-1] != self.input_dim:
-                pad_size = self.input_dim - H.shape[-1]
-                pad = H.new_zeros(H.size(0), pad_size)
-                H = torch.cat([H, pad], dim=-1)
+            H = F.pad(H * mask, (0, self.input_dim - self.half))
 
             x = x0 * (H + self.b[i]) + x
             x = torch.clamp(x, min=-10, max=10)
             x = x / (torch.norm(x, p=2, dim=-1, keepdim=True) + 1e-12)
             if len(self.dropout) > i:
                 x = self.dropout[i](x)
-                
-        logit = self.sfc(x)
-        return logit
+
+        return self.sfc(x)
+
 
 class DCNv3(nn.Module):
     def __init__(self,
@@ -188,49 +166,38 @@ class DCNv3(nn.Module):
                  batch_norm=True):
         super(DCNv3, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
+
+        # Projection layer to map input to fixed dimension (256)
+        self.project = nn.Linear(input_dim, 256).to(self.device)
+
         self.ECN = ExponentialCrossNetwork(
-            input_dim=input_dim,
+            input_dim=256,
             num_cross_layers=num_deep_cross_layers,
             net_dropout=deep_net_dropout,
             layer_norm=layer_norm,
             batch_norm=batch_norm
         ).to(self.device)
-        
+
         self.LCN = LinearCrossNetwork(
-            input_dim=input_dim,
+            input_dim=256,
             num_cross_layers=num_shallow_cross_layers,
             net_dropout=shallow_net_dropout,
             layer_norm=layer_norm,
             batch_norm=batch_norm
         ).to(self.device)
-        
-        self.apply(self._init_weights)
-        self.output_activation = torch.sigmoid
 
-    def _init_weights(self, module):
-        if isinstance(module, torch.nn.Linear):
-            torch.nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, torch.nn.Embedding):
-            torch.nn.init.xavier_uniform_(module.weight)
+        self.output_activation = torch.sigmoid
 
     def forward(self, inputs):
         inputs = inputs.to(self.device)
-        
-        feature_emb = inputs
-        dlogit = self.ECN(feature_emb).mean(dim=1)
-        slogit = self.LCN(feature_emb).mean(dim=1)
-        logit = (dlogit + slogit) * 0.5
-    
-        y_pred = self.output_activation(logit)
-        y_d = self.output_activation(dlogit)
-        y_s = self.output_activation(slogit)
+        x = self.project(inputs)
+        dlogit = self.ECN(x).mean(dim=1)
+        slogit = self.LCN(x).mean(dim=1)
+        logit = 0.5 * (dlogit + slogit)
         return {
-            "y_pred": y_pred,
-            "y_d": y_d,
-            "y_s": y_s
+            "y_pred": self.output_activation(logit),
+            "y_d": self.output_activation(dlogit),
+            "y_s": self.output_activation(slogit)
         }
 
 class TriBCE_Loss(nn.Module):
