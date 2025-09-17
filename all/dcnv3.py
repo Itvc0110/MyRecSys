@@ -170,7 +170,7 @@ class DCNv3(nn.Module):
                  shallow_net_dropout=0.1,
                  layer_norm=True,
                  batch_norm=True,
-                 num_heads=2):
+                 num_heads=1):
         super(DCNv3, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
